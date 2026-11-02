@@ -1,0 +1,15 @@
+{
+  "name": "grainsense-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Dashboard lokal GrainSense: MQTT -> riwayat (file) -> browser, plus simulator ESP32",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "sim": "node simulator.js",
+    "sim:demo": "node simulator.js --demo --backlog 20"
+  },
+  "dependencies": {
+    "mqtt": "^5.10.1"
+  }
+}

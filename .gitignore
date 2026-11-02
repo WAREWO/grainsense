@@ -1,0 +1,14 @@
+# kredensial Wi-Fi (lihat rahasia.contoh.h)
+rahasia.h
+
+# dashboard: dependensi & data riwayat lokal
+dashboard/node_modules/
+dashboard/data/
+
+# Arduino / editor / OS
+build/
+*.bin
+*.elf
+.vscode/
+Thumbs.db
+desktop.ini

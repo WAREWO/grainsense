@@ -1,0 +1,417 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>GrainSense Dashboard</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%231d6b45'/%3E%3Cellipse cx='16' cy='16' rx='5' ry='9' fill='none' stroke='white' stroke-width='3'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<!-- ikon (sprite SVG, tanpa internet) -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7.5" height="9" rx="2"/><rect x="13.5" y="3" width="7.5" height="5.5" rx="2"/><rect x="3" y="15" width="7.5" height="6" rx="2"/><rect x="13.5" y="11.5" width="7.5" height="9.5" rx="2"/></symbol>
+    <symbol id="i-chart" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="4" y="3" width="16" height="18" rx="3"/><path d="M8 8h8M8 12h8M8 16h5"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+    <symbol id="i-chip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></symbol>
+    <symbol id="i-download" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10l5 5 5-5M4 19h16"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5M9 8h6"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4z"/><path d="M10 21h4"/></symbol>
+    <symbol id="i-sync" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17 17 7M9 7h8v8"/></symbol>
+    <symbol id="i-fan" viewBox="0 0 24 24" fill="currentColor"><path d="M12 10.2c.6-3.4-.4-6.7-3.2-7.1C6.3 2.7 5 5.4 7 7.6c1.2 1.3 3 2.2 5 2.6zm1.8 1.8c3.4.6 6.7-.4 7.1-3.2.4-2.5-2.3-3.8-4.5-1.8-1.3 1.2-2.2 3-2.6 5zM12 13.8c-.6 3.4.4 6.7 3.2 7.1 2.5.4 3.8-2.3 1.8-4.5-1.2-1.3-3-2.2-5-2.6zM10.2 12c-3.4-.6-6.7.4-7.1 3.2-.4 2.5 2.3 3.8 4.5 1.8 1.3-1.2 2.2-3 2.6-5z"/><circle cx="12" cy="12" r="1.6"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 0 0 1.5.9l10-6.5a1 1 0 0 0 0-1.8l-10-6.5A1 1 0 0 0 8 5.5z"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></symbol>
+    <symbol id="i-thermo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M10 13.5V5a2 2 0 0 1 4 0v8.5a4 4 0 1 1-4 0z"/><path d="M12 9v7"/></symbol>
+    <symbol id="i-drop" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/></symbol>
+    <symbol id="i-cloud" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M7 18h10a4 4 0 0 0 .5-8A6 6 0 0 0 6 9.5 4.3 4.3 0 0 0 7 18z"/></symbol>
+    <symbol id="i-scale" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M6 8h12l2 12H4z"/><circle cx="12" cy="5" r="2"/></symbol>
+    <symbol id="i-wave" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 12h3l3-7 4 14 3-9 2 2h5"/></symbol>
+    <symbol id="i-swap" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M7 4v14M4 15l3 3 3-3M17 20V6M14 9l3-3 3 3"/></symbol>
+    <symbol id="i-alert" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20z"/><path d="M12 10v4M12 17h0"/></symbol>
+    <symbol id="i-flask" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 0 0 1.3 2h12.4a1.5 1.5 0 0 0 1.3-2L14 9V3"/><path d="M7 15h10"/></symbol>
+    <symbol id="i-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M2 9a15 15 0 0 1 20 0M5 12.5a10 10 0 0 1 14 0M8.5 16a5 5 0 0 1 7 0"/><circle cx="12" cy="19.5" r="1" fill="currentColor"/></symbol>
+    <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 3 10 14M21 3l-7 18-4-7-7-4z"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 3v8M6.3 6.3a8 8 0 1 0 11.4 0"/></symbol>
+    <symbol id="i-grain" viewBox="0 0 32 32" fill="none" stroke="currentColor" stroke-width="2.6"><circle cx="16" cy="16" r="13"/><ellipse cx="16" cy="16" rx="4.6" ry="8"/></symbol>
+  </defs>
+</svg>
+
+<div class="layar">
+  <!-- ====================== SIDEBAR ====================== -->
+  <aside class="sidebar">
+    <a class="logo" href="#atas">
+      <svg class="logo-ikon"><use href="#i-grain"/></svg>
+      <span>GrainSense</span>
+    </a>
+
+    <p class="menu-judul">MENU</p>
+    <nav class="menu">
+      <a href="#atas" class="aktif"><svg><use href="#i-grid"/></svg>Dashboard</a>
+      <a href="#bagian-peringatan"><svg><use href="#i-alert"/></svg>Peringatan <span class="lencana merah" id="menu-jml-peringatan" hidden>0</span></a>
+      <a href="#bagian-riwayat"><svg><use href="#i-chart"/></svg>Riwayat</a>
+      <a href="#bagian-kejadian"><svg><use href="#i-list"/></svg>Log Kejadian <span class="lencana" id="menu-jml-kejadian">0</span></a>
+      <a href="#bagian-kontrol"><svg><use href="#i-sliders"/></svg>Kontrol</a>
+      <a href="#bagian-sensor"><svg><use href="#i-chip"/></svg>Sensor</a>
+    </nav>
+
+    <p class="menu-judul">UMUM</p>
+    <nav class="menu">
+      <a href="#" data-buka="dlg-ekspor"><svg><use href="#i-download"/></svg>Ekspor CSV</a>
+      <a href="#" data-buka="dlg-panduan"><svg><use href="#i-book"/></svg>Logika Aerasi</a>
+      <a href="#" id="menu-sinkron"><svg><use href="#i-sync"/></svg>Sinkron Waktu</a>
+    </nav>
+
+    <div class="promo">
+      <svg class="promo-ikon"><use href="#i-clock"/></svg>
+      <h3 id="promo-judul">Mode Demo</h3>
+      <p id="promo-teks">Durasi minimum nyala/mati & CO₂ bertahan dipersingkat jadi 60 detik.</p>
+      <button class="btn-promo" id="btn-demo">Aktifkan Demo</button>
+    </div>
+  </aside>
+
+  <!-- ====================== KOLOM UTAMA ====================== -->
+  <div class="utama" id="atas">
+    <header class="topbar">
+      <div class="chips-koneksi">
+        <span class="chip-kon" id="kon-server"><i></i>Server</span>
+        <span class="chip-kon" id="kon-mqtt"><i></i>Broker MQTT</span>
+        <span class="chip-kon" id="kon-esp"><i></i>ESP32</span>
+        <span class="chip-kon netral" id="kon-rssi"><svg><use href="#i-wifi"/></svg><b>—</b></span>
+      </div>
+      <div class="topbar-kanan">
+        <div class="jam-box"><svg><use href="#i-clock"/></svg><span id="jam">--:--:--</span></div>
+        <button class="btn-ikon" id="btn-lonceng" title="Alarm"><svg><use href="#i-bell"/></svg><span class="titik-notif" id="jml-alarm" hidden>0</span></button>
+        <div class="profil">
+          <div class="avatar">R</div>
+          <div>
+            <b>Riyu</b>
+            <small>Tim berat bersih 500 ML · <span id="silo-id">silo01</span></small>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main class="konten">
+      <div class="banner banner-sim" id="banner-sim" hidden>
+        <svg><use href="#i-flask"/></svg>
+        <div><b>MODE SIMULASI AKTIF</b> — sebagian nilai di bawah berasal dari perintah <code>sim</code>, <u>bukan</u> dari sensor. <span id="banner-sim-detail"></span></div>
+        <button class="btn kecil putih" id="btn-banner-simoff">Matikan simulasi</button>
+      </div>
+      <div class="banner banner-alarm" id="banner-alarm" hidden>
+        <svg><use href="#i-alert"/></svg>
+        <div><b id="banner-alarm-judul">ALARM</b> — <span id="banner-alarm-teks"></span></div>
+      </div>
+      <div class="banner banner-offline" id="banner-offline" hidden>
+        <svg><use href="#i-power"/></svg>
+        <div id="banner-offline-teks"></div>
+      </div>
+
+      <div class="kepala-halaman">
+        <div>
+          <h1>Dashboard</h1>
+          <p id="sub-halaman"><span id="sub-batch">Kelompok gabah belum diisi</span>
+            <button class="tautan" data-buka="dlg-batch" id="btn-ubah-batch">Isi kelompok</button>
+            <span class="pemisah">·</span><span id="sub-pembaruan">menunggu data</span></p>
+        </div>
+        <div class="aksi-kepala">
+          <button class="btn utama-btn" data-buka="dlg-ekspor"><svg><use href="#i-download"/></svg>Ekspor CSV</button>
+          <button class="btn garis" data-buka="dlg-panduan">Logika Aerasi</button>
+        </div>
+      </div>
+
+      <section class="grid">
+        <!-- ---------- KARTU STATISTIK ---------- -->
+        <article class="kartu stat hero" data-metrik="suhu">
+          <div class="stat-kepala"><h3>Suhu Ruang Simpan</h3><button class="btn-panah" title="Lihat grafik suhu"><svg><use href="#i-arrow"/></svg></button></div>
+          <div class="stat-nilai"><span id="v-tdalam">—</span><small>°C</small><span class="tag-sim" hidden>SIM</span></div>
+          <p class="stat-kaki" id="d-tdalam">Menunggu data…</p>
+        </article>
+        <article class="kartu stat" data-metrik="rh">
+          <div class="stat-kepala"><h3>Kelembapan Dalam</h3><button class="btn-panah" title="Lihat grafik RH"><svg><use href="#i-arrow"/></svg></button></div>
+          <div class="stat-nilai"><span id="v-rhdalam">—</span><small>%RH</small><span class="tag-sim" hidden>SIM</span></div>
+          <p class="stat-kaki" id="d-rhdalam">Menunggu data…</p>
+        </article>
+        <article class="kartu stat" data-metrik="co2">
+          <div class="stat-kepala"><h3 class="label-co2-judul">CO₂ Respirasi</h3><button class="btn-panah" title="Lihat grafik CO₂"><svg><use href="#i-arrow"/></svg></button></div>
+          <div class="stat-nilai"><span id="v-co2">—</span><small>ppm</small><span class="tag-sim" hidden>SIM</span></div>
+          <p class="stat-kaki" id="d-co2">Menunggu data…</p>
+        </article>
+        <article class="kartu stat" data-metrik="massa">
+          <div class="stat-kepala"><h3>Massa Gabah</h3><button class="btn-panah" title="Lihat grafik massa"><svg><use href="#i-arrow"/></svg></button></div>
+          <div class="stat-nilai"><span id="v-massa">—</span><small>g</small><span class="tag-sim" hidden>SIM</span></div>
+          <p class="stat-kaki" id="d-massa">Menunggu data…</p>
+        </article>
+
+        <!-- ---------- GRAFIK RIWAYAT ---------- -->
+        <article class="kartu lebar-2" id="bagian-riwayat">
+          <div class="kartu-kepala">
+            <h2>Grafik Riwayat</h2>
+            <div class="tab" id="tab-rentang">
+              <button data-rentang="1h" class="aktif">1 Jam</button>
+              <button data-rentang="24h">24 Jam</button>
+              <button data-rentang="72h">3 Hari</button>
+            </div>
+          </div>
+          <div class="baris-tab">
+            <div class="tab kecil" id="tab-metrik">
+              <button data-metrik="suhu" class="aktif">Suhu</button>
+              <button data-metrik="rh">RH</button>
+              <button data-metrik="co2" class="label-co2">CO₂</button>
+              <button data-metrik="massa">Massa</button>
+            </div>
+            <label class="saklar"><input type="checkbox" id="cek-proyeksi" checked><span></span>Proyeksi</label>
+          </div>
+          <div class="grafik" id="grafik"><div class="grafik-kosong">Memuat riwayat…</div></div>
+          <div class="legenda" id="legenda"></div>
+          <p class="catatan-proyeksi" id="teks-proyeksi"></p>
+        </article>
+
+        <!-- ---------- KEPUTUSAN AERASI ---------- -->
+        <article class="kartu aerasi">
+          <div class="kartu-kepala"><h2>Keputusan Aerasi</h2><div class="chips-mode" id="chips-mode"></div></div>
+          <div class="blower-status" id="blower-status">
+            <svg class="kipas"><use href="#i-fan"/></svg>
+            <div><h3 id="blower-teks">Blower —</h3><small id="blower-sejak"></small></div>
+          </div>
+          <p class="info-masuk">Udara masuk: <b id="v-tmasuk">—</b> °C · RH <b id="v-rhmasuk">—</b> %</p>
+          <div class="syarat">
+            <span class="pil-syarat" id="syarat-butuh">Butuh aerasi</span>
+            <span class="pil-syarat" id="syarat-layak">Udara layak</span>
+          </div>
+          <p class="alasan" id="alasan">Menunggu data dari ESP32…</p>
+          <button class="btn-besar" id="btn-blower"><svg><use href="#i-fan"/></svg><span>Nyalakan Manual</span></button>
+        </article>
+
+        <!-- ---------- KESEHATAN SENSOR ---------- -->
+        <article class="kartu" id="bagian-sensor">
+          <div class="kartu-kepala"><h2>Kesehatan Sensor</h2><span class="pil-kecil" id="prioritas">—</span></div>
+          <ul class="daftar-sensor" id="daftar-sensor"></ul>
+        </article>
+
+        <!-- ---------- PERINGATAN & PRIORITAS (Gambar 3.5) ---------- -->
+        <article class="kartu lebar-2" id="bagian-peringatan">
+          <div class="kartu-kepala">
+            <div><h2>Peringatan & Prioritas</h2><p class="sub-kepala" id="ringkas-peringatan">—</p></div>
+            <div class="tab kecil" id="tab-peringatan">
+              <button data-tampil="aktif" class="aktif">Aktif</button>
+              <button data-tampil="selesai">Selesai 24 jam</button>
+            </div>
+          </div>
+          <ul class="daftar-peringatan" id="daftar-peringatan"><li class="kosong">Memuat…</li></ul>
+        </article>
+
+        <!-- ---------- AERASI HARI INI (Gambar 3.4, Tabel 2.4) ---------- -->
+        <article class="kartu">
+          <div class="kartu-kepala"><h2>Aerasi Hari Ini</h2></div>
+          <div class="angka-ganda">
+            <div><b id="ah-siklus">0</b><small>siklus</small></div>
+            <div><b id="ah-menit">0</b><small>menit ON</small></div>
+          </div>
+          <ul class="daftar-siklus" id="daftar-siklus"></ul>
+          <p class="kaki-kartu" id="ah-energi">—</p>
+        </article>
+
+        <!-- ---------- STOK HARI INI (Gambar 3.3, Tabel 2.2) ---------- -->
+        <article class="kartu">
+          <div class="kartu-kepala"><h2>Stok Hari Ini</h2><span class="pil-kecil" id="stok-status">—</span></div>
+          <div class="stok-bersih"><b id="stok-bersih">—</b><small>g</small></div>
+          <p class="sub" id="stok-dari">Belum ada data massa stabil hari ini.</p>
+          <ul class="daftar-stok">
+            <li><span>Masuk</span><b id="stok-masuk">—</b></li>
+            <li><span>Keluar</span><b id="stok-keluar">—</b></li>
+            <li><span>Tidak tercatat</span><b id="stok-tak">—</b></li>
+          </ul>
+          <p class="kaki-kartu" id="stok-ket">Perubahan massa tanpa transaksi ≥ 15 g ditandai anomali (kebocoran, tumpahan, atau drift).</p>
+        </article>
+
+        <!-- ---------- LOG KEJADIAN ---------- -->
+        <article class="kartu lebar-2" id="bagian-kejadian">
+          <div class="kartu-kepala">
+            <h2>Log Kejadian</h2>
+            <div class="aksi-kecil">
+              <select id="filter-kejadian" class="pilih">
+                <option value="semua">Semua</option>
+                <option value="blower">Blower</option>
+                <option value="transaksi">Transaksi massa</option>
+                <option value="mode">Mode & simulasi</option>
+                <option value="alarm">Alarm & sensor</option>
+                <option value="sistem">Sistem & perintah</option>
+              </select>
+              <a class="btn garis kecil" href="/api/ekspor.csv?jenis=kejadian&rentang=72h"><svg><use href="#i-download"/></svg>CSV</a>
+            </div>
+          </div>
+          <ul class="daftar-kejadian" id="daftar-kejadian"><li class="kosong">Belum ada kejadian.</li></ul>
+        </article>
+
+        <!-- ---------- KADAR AIR (GAUGE) ---------- -->
+        <article class="kartu">
+          <div class="kartu-kepala"><h2>Kadar Air Gabah</h2></div>
+          <div class="gauge" id="gauge">
+            <svg viewBox="0 0 240 140">
+              <defs>
+                <pattern id="arsir-gauge" patternUnits="userSpaceOnUse" width="7" height="7" patternTransform="rotate(45)">
+                  <rect width="7" height="7" fill="#fff"/><rect width="2.6" height="7" fill="#9aa7a0"/>
+                </pattern>
+              </defs>
+              <path d="M30 120 A90 90 0 0 1 210 120" fill="none" stroke="url(#arsir-gauge)" stroke-width="30" stroke-linecap="round"/>
+              <path id="gauge-aman" d="M30 120 A90 90 0 0 1 210 120" fill="none" stroke="#2f9e62" stroke-width="30" stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/>
+              <path id="gauge-nilai" d="M30 120 A90 90 0 0 1 210 120" fill="none" stroke="#14532d" stroke-width="30" stroke-linecap="round" pathLength="100" stroke-dasharray="0 100"/>
+            </svg>
+            <div class="gauge-teks"><b id="v-kadar">—</b><small id="v-kadar-ket">kadar air</small></div>
+          </div>
+          <div class="legenda gauge-legenda">
+            <span><i class="bulat hijau"></i>Aman ≤ 14 %</span>
+            <span><i class="bulat tua"></i>Perlu dikeringkan</span>
+            <span><i class="arsir"></i>Skala 8–22 %</span>
+          </div>
+        </article>
+
+        <!-- ---------- WAKTU AKTIF ESP (dark) ---------- -->
+        <article class="kartu gelap">
+          <h2>Waktu Aktif ESP32</h2>
+          <div class="uptime" id="uptime">--:--:--</div>
+          <p class="sinkron" id="info-sinkron">Waktu ESP: —</p>
+          <div class="tombol-bulat">
+            <button class="bulat-putih" id="btn-auto-cepat" title="Kembali ke mode AUTO"><svg><use href="#i-play"/></svg></button>
+            <button class="bulat-merah" id="btn-off-cepat" title="Paksa blower MATI (manual off)"><svg><use href="#i-stop"/></svg></button>
+          </div>
+          <small class="ket-tombol">▶ AUTO &nbsp;·&nbsp; ■ paksa blower mati</small>
+        </article>
+
+        <!-- ---------- PANEL KONTROL ---------- -->
+        <article class="kartu lebar-2" id="bagian-kontrol">
+          <div class="kartu-kepala"><h2>Panel Kontrol</h2><span class="pil-kecil" id="mode-kontrol">AUTO</span></div>
+          <p class="sub">Setiap perintah dikonfirmasi dulu sebelum dikirim ke <code id="topik-cmd">grainsense/silo01/cmd</code>.</p>
+          <div class="kontrol-grid">
+            <button class="btn-kontrol" data-cmd="auto"><svg><use href="#i-play"/></svg><b>AUTO</b><small>Logika Tabel 3.5</small></button>
+            <div class="btn-kontrol gabung">
+              <button id="btn-manual-on"><svg><use href="#i-fan"/></svg><b>MANUAL ON</b><small>Blower dipaksa nyala</small></button>
+              <select id="pilih-menit" class="pilih" title="Lama mode manual">
+                <option value="5">5 mnt</option><option value="10" selected>10 mnt</option>
+                <option value="15">15 mnt</option><option value="20">20 mnt</option><option value="30">30 mnt</option>
+              </select>
+            </div>
+            <button class="btn-kontrol" id="btn-manual-off"><svg><use href="#i-stop"/></svg><b>MANUAL OFF</b><small>Blower dipaksa mati</small></button>
+            <button class="btn-kontrol" id="btn-demo-2"><svg><use href="#i-clock"/></svg><b id="teks-demo-2">DEMO ON</b><small>Durasi 60 detik</small></button>
+            <button class="btn-kontrol" id="btn-tara"><svg><use href="#i-scale"/></svg><b>TARA</b><small>Nolkan timbangan</small></button>
+            <button class="btn-kontrol" id="btn-sinkron-2"><svg><use href="#i-sync"/></svg><b>SINKRON</b><small>Kirim waktu ke ESP</small></button>
+          </div>
+          <form class="perintah-bebas" id="form-perintah">
+            <input id="input-perintah" placeholder="Perintah lanjutan, mis. kal lihat · status · scan" autocomplete="off">
+            <button class="btn utama-btn kecil" type="submit"><svg><use href="#i-send"/></svg>Kirim</button>
+          </form>
+        </article>
+
+        <!-- ---------- PANEL SIMULASI ---------- -->
+        <article class="kartu lebar-2 kartu-sim">
+          <div class="kartu-kepala">
+            <h2>Panel Simulasi</h2>
+            <span class="pil-kecil" id="status-sim">Nonaktif</span>
+          </div>
+          <p class="sub">Untuk menguji logika aerasi tanpa mengubah kondisi nyata. Data yang terpengaruh akan ditandai <b class="teks-oranye">SIMULASI</b> di seluruh dashboard dan di file CSV.</p>
+          <div class="sim-grid">
+            <label>T dalam (°C)<input type="number" step="0.1" data-sim="tdalam" placeholder="32"></label>
+            <label>RH dalam (%)<input type="number" step="0.1" data-sim="rhdalam" placeholder="70"></label>
+            <label>T masuk (°C)<input type="number" step="0.1" data-sim="tmasuk" placeholder="26"></label>
+            <label>RH masuk (%)<input type="number" step="0.1" data-sim="rhmasuk" placeholder="65"></label>
+            <label><span><span class="label-co2">CO₂</span> (ppm)</span><input type="number" step="1" data-sim="co2" placeholder="1800"></label>
+          </div>
+          <div class="sim-aksi">
+            <button class="btn oranye kecil" id="btn-sim-kirim"><svg><use href="#i-flask"/></svg>Kirim nilai terisi</button>
+            <button class="btn garis kecil" data-skenario="panas">Skenario: panas & udara layak</button>
+            <button class="btn garis kecil" data-skenario="lembap">Skenario: udara lembap</button>
+            <button class="btn garis kecil" data-skenario="co2">Skenario: <span class="label-co2">CO₂</span> alarm</button>
+            <button class="btn garis kecil merah" id="btn-sim-off">Matikan simulasi</button>
+          </div>
+        </article>
+      </section>
+
+      <footer class="kaki">GrainSense · Final Telepati 8.0 AgroIoT Innovation Challenge · data disimpan lokal di laptop (folder <code>dashboard/data</code>)</footer>
+    </main>
+  </div>
+</div>
+
+<!-- ====================== DIALOG ====================== -->
+<dialog class="dialog" id="dlg-konfirmasi">
+  <form method="dialog">
+    <h3 id="konf-judul">Konfirmasi</h3>
+    <p id="konf-pesan"></p>
+    <div class="konf-perintah" id="konf-perintah"></div>
+    <div class="dialog-aksi">
+      <button class="btn garis" value="batal">Batal</button>
+      <button class="btn utama-btn" value="ok" id="konf-ok">Kirim perintah</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="dialog" id="dlg-ekspor">
+  <form method="dialog">
+    <h3>Ekspor CSV</h3>
+    <p>Unduh riwayat untuk laporan (uji Tabel 3.6 & uji stabilitas 3 hari). Kolom <code>simulasi</code> = 1 menandai data simulasi.</p>
+    <div class="ekspor-grid">
+      <label>Data
+        <select id="ekspor-jenis" class="pilih"><option value="telemetri">Telemetri (tiap 5 detik)</option><option value="kejadian">Log kejadian</option></select>
+      </label>
+      <label>Rentang
+        <select id="ekspor-rentang" class="pilih">
+          <option value="1h">1 jam terakhir</option><option value="24h" selected>24 jam terakhir</option>
+          <option value="72h">3 hari terakhir</option><option value="semua">Semua data</option>
+        </select>
+      </label>
+    </div>
+    <div class="dialog-aksi">
+      <button class="btn garis" value="batal">Tutup</button>
+      <button class="btn utama-btn" value="ok" id="btn-unduh"><svg><use href="#i-download"/></svg>Unduh</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="dialog" id="dlg-batch">
+  <form method="dialog">
+    <h3>Kelompok Gabah</h3>
+    <p>Identitas gabah yang sedang disimpan. Kodenya ikut tercatat di setiap baris CSV telemetri (kolom <code>kelompok</code>).</p>
+    <div class="ekspor-grid">
+      <label>Kode kelompok *<input class="isian" id="b-kode" maxlength="30" placeholder="G-01"></label>
+      <label>Tanggal masuk<input class="isian" id="b-tanggal" type="date"></label>
+      <label>Asal gabah<input class="isian" id="b-asal" maxlength="60" placeholder="mis. Petani Purwakarta"></label>
+      <label>Kondisi awal<input class="isian" id="b-kondisi" maxlength="80" placeholder="mis. kadar air 13,8 % (alat acuan)"></label>
+      <label>Catatan<input class="isian" id="b-catatan" maxlength="120"></label>
+    </div>
+    <div class="dialog-aksi">
+      <button class="btn garis" value="batal">Batal</button>
+      <button class="btn utama-btn" value="ok">Simpan</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog class="dialog lebar" id="dlg-panduan">
+  <form method="dialog">
+    <h3>Logika Aerasi (Tabel 3.5 proposal)</h3>
+    <ul class="panduan">
+      <li><b>Blower NYALA</b> bila <b>T dalam ≥ 28 °C</b> atau <b><span class="label-co2">CO₂</span> ≥ 1500 ppm bertahan 30 menit</b>,
+        <u>dan</u> udara masuk layak: <b>RH masuk ≤ 70 %</b> dan <b>≥ 3 °C lebih dingin</b> dari T dalam.</li>
+      <li><b>Blower MATI</b> bila <b>T dalam ≤ 25 °C</b> atau <b>RH masuk &gt; 75 %</b> (histeresis agar tidak sering ganti).</li>
+      <li>Minimal nyala 30 menit & minimal mati 30 menit. <b>Mode demo</b> memendekkan semua durasi menjadi 60 detik.</li>
+      <li>Alarm pemeriksaan manual bila <b><span class="label-co2">CO₂</span> &gt; 3000 ppm</b>.</li>
+      <li>Massa dibekukan saat blower nyala dan 15 detik sesudahnya (getaran blower). Transaksi dicatat bila perubahan ≥ 20 g.</li>
+      <li>Mode manual punya batas waktu (default 10, maks 30 menit), lalu otomatis kembali AUTO.</li>
+      <li>Jika SHT31 gangguan, keputusan otomatis dihentikan, blower mati, prioritas <b>tinggi</b> → pemeriksaan manual.</li>
+    </ul>
+    <p class="sub">Garis putus-putus “proyeksi” di grafik adalah regresi linear sederhana dari data terakhir — perkiraan tren, bukan prediksi AI.</p>
+    <div class="dialog-aksi"><button class="btn utama-btn" value="ok">Mengerti</button></div>
+  </form>
+</dialog>
+
+<div class="toast-wadah" id="toast-wadah"></div>
+<div class="tooltip" id="tooltip" hidden></div>
+
+<script src="inti.js"></script>
+<script src="sim-inti.js"></script>
+<script src="demo.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
