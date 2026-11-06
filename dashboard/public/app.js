@@ -15,7 +15,7 @@ const BASI_MS = 20000;           // > 20 s tanpa telemetri = data dianggap basi
 const KOLOM_ANGKA = ['t_dalam', 'rh_dalam', 't_masuk', 'rh_masuk', 'co2', 'massa_g', 'kadar_air'];
 
 const st = {
-  labelCo2: 'CO₂', silo: 'silo01',
+  labelCo2: 'CO₂', silo: 'silo01', kapasitasG: 11000, es: null,
   serverOk: false, mqtt: false, esp: { status: 'tidak diketahui', sejak: 0 },
   t: null, selisihJam: 0, waktuKirim: 0,
   kejadian: [], filter: 'semua',
@@ -83,7 +83,7 @@ function konfirmasi({ judul, pesan, perintah, tombol = 'Kirim perintah', bahaya 
 
 async function kirim(daftar) {
   for (const cmd of daftar) {
-    const r = await fetch('/api/perintah', {
+    const r = await fetch(api('/api/perintah'), {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cmd }),
     });
     const j = await r.json().catch(() => ({}));
@@ -100,26 +100,40 @@ async function aksi(opsi) {
   } catch (e) { toast(e.message, 'buruk'); }
 }
 
+// silo yang dibuka (?silo=silo02); semua panggilan /api/* membawa parameter ini
+let SILO_PILIH = new URLSearchParams(location.search).get('silo');
+function api(alamat) {
+  if (!SILO_PILIH) return alamat;
+  return alamat + (alamat.includes('?') ? '&' : '?') + `silo=${encodeURIComponent(SILO_PILIH)}`;
+}
+const namaSilo = (id) => `Silo ${String(id || '').replace(/^silo[-_ ]?/i, '').toUpperCase() || '—'}`;
+
+function unduh(alamat) {
+  if (window.GS_DEMO) window.GS_DEMO.unduh(alamat);   // mode demo: CSV dibuat di browser
+  else window.location.href = alamat;
+}
+
 const menitManual = () => $('#pilih-menit').value;
+const lamaManual = () => $('#pilih-menit').selectedOptions[0].textContent;
 
 const AKSI = {
   auto: () => aksi({ judul: 'Kembali ke mode AUTO?', pesan: 'Blower akan dikendalikan lagi oleh logika Tabel 3.5.', perintah: ['auto'] }),
   manualOn: () => aksi({
     judul: 'Nyalakan blower manual?',
-    pesan: `Blower dipaksa NYALA selama ${menitManual()} menit tanpa memedulikan kelayakan udara, lalu otomatis kembali AUTO.`,
+    pesan: `Blower dipaksa NYALA selama ${lamaManual()} tanpa memedulikan kelayakan udara, lalu otomatis kembali AUTO.`,
     perintah: [`manual on ${menitManual()}`], tombol: 'Nyalakan',
   }),
   manualOff: () => aksi({
     judul: 'Paksa blower mati?',
-    pesan: `Blower dipaksa MATI selama ${menitManual()} menit, lalu otomatis kembali AUTO.`,
+    pesan: `Blower dipaksa MATI selama ${lamaManual()}, lalu otomatis kembali AUTO.`,
     perintah: [`manual off ${menitManual()}`], tombol: 'Matikan', bahaya: true,
   }),
   demo: () => {
     const nyala = !st.t?.demo;
     aksi({
       judul: nyala ? 'Aktifkan mode DEMO?' : 'Matikan mode DEMO?',
-      pesan: nyala ? 'Durasi minimum nyala/mati dan CO₂ bertahan dipersingkat menjadi 60 detik (untuk presentasi juri).'
-        : 'Durasi kembali normal: minimum 30 menit.',
+      pesan: nyala ? 'Durasi minimum nyala/mati dan CO₂ bertahan 3 detik (untuk presentasi juri).'
+        : 'Durasi tetap 3 detik.',
       perintah: [nyala ? 'demo on' : 'demo off'],
     });
   },
@@ -131,7 +145,7 @@ const AKSI = {
 };
 
 async function sinkronWaktu() {
-  const r = await fetch('/api/sinkron-waktu', { method: 'POST' }).catch(() => null);
+  const r = await fetch(api('/api/sinkron-waktu'), { method: 'POST' }).catch(() => null);
   if (r?.ok) toast('Waktu laptop dikirim ke grainsense/time');
   else toast('Gagal: broker MQTT belum tersambung', 'buruk');
 }
@@ -201,7 +215,7 @@ function renderStat() {
   $('#v-tdalam').textContent = fmt(t.t_dalam, 1);
   $('#v-rhdalam').textContent = fmt(t.rh_dalam, 1);
   $('#v-co2').textContent = t.co2 == null ? '—' : fmt(t.co2, 0);
-  $('#v-massa').textContent = fmt(t.massa_g, 0);
+  $('#v-massa').textContent = t.massa_g == null ? '—' : fmt(t.massa_g / 1000, 2);
 
   const kartu = (m) => $(`.stat[data-metrik="${m}"]`);
   kartu('suhu').classList.toggle('waspada', t.t_dalam != null && t.t_dalam >= 28);
@@ -223,14 +237,83 @@ function renderStat() {
 
   let chip;
   if (sen.hx711 && sen.hx711 !== 'ok') chip = `<span class="chip-massa bergerak">${NAMA_STATUS[sen.hx711]}</span>`;
-  else if (t.massa_beku) chip = '<span class="chip-massa beku">BEKU</span> ditahan karena getaran blower';
-  else if (!t.massa_stabil) chip = '<span class="chip-massa bergerak">BERGERAK</span> menunggu stabil';
+  else if (t.massa_beku) chip = '<span class="chip-massa beku">BEKU</span> ditahan selama blower menyala (getaran)';
+  else if (!t.massa_stabil) chip = '<span class="chip-massa bergerak">MENIMBANG</span> menunggu angka stabil';
   else {
     const tr = st.kejadian.find((k) => k.jenis === 'transaksi');
     chip = '<span class="chip-massa">STABIL</span>' +
-      (tr ? ` terakhir ${tr.data.delta_g > 0 ? '+' : '−'}${Math.abs(tr.data.delta_g)} g, ${jam(tr.ts)}` : ' belum ada transaksi');
+      (tr ? ` terakhir ${tr.data.delta_g > 0 ? 'masuk' : 'keluar'} ${fmt(Math.abs(tr.data.delta_g) / 1000, 2)} kg, ${jam(tr.ts)}` : ' belum ada transaksi');
   }
   $('#d-massa').innerHTML = chip;
+
+  // tabel nilai proses di samping tangki (warna hanya saat tidak normal)
+  const kal = sen.kapasitif === 'ok' && t.kadar_air != null;
+  const pv = (id, nilai, des, tingkat) => {
+    const tr = $(id);
+    tr.querySelector('b').textContent = nilai == null ? '—' : fmt(nilai, des);
+    tr.classList.toggle('waspada', tingkat === 'waspada');
+    tr.classList.toggle('bahaya', tingkat === 'bahaya');
+  };
+  pv('#pv-kadar', kal ? t.kadar_air : null, 1, !kal ? '' : t.kadar_air > AIR.basah ? 'bahaya' : t.kadar_air > AIR.aman ? 'waspada' : '');
+  pv('#pv-suhu', t.t_dalam, 1, t.t_dalam != null && t.t_dalam >= 28 ? 'waspada' : '');
+  pv('#pv-rh', t.rh_dalam, 1, '');
+  pv('#pv-co2', t.co2, 0, t.alarm_co2 ? 'bahaya' : t.co2 != null && t.co2 >= 1500 ? 'waspada' : '');
+  pv('#pv-tmasuk', t.t_masuk, 1, '');
+  pv('#pv-rhmasuk', t.rh_masuk, 1, t.rh_masuk != null && t.rh_masuk > 70 ? 'waspada' : '');
+}
+
+// alasan singkat 1 baris; teks lengkap dari firmware muncul saat kursor diarahkan
+function ringkasAlasan(t) {
+  if (t.mode === 'MANUAL') {
+    const sisa = /sisa (\d+ (?:menit|detik))/.exec(t.alasan || '');
+    return `${t.blower ? 'Dipaksa nyala' : 'Dipaksa mati'} oleh operator${sisa ? `, sisa ${sisa[1]}` : ''}`;
+  }
+  if ((t.alasan || '').startsWith('Keputusan otomatis dihentikan')) return 'Kendali otomatis berhenti: sensor suhu/RH gangguan';
+  if (t.blower) {
+    if (t.t_dalam != null && t.t_dalam >= 28) return 'Mendinginkan ruang simpan (suhu ≥ 28 °C)';
+    if (t.co2 != null && t.co2 >= 1500) return `Mengganti udara, ${st.labelCo2} tinggi`;
+    return 'Aerasi berjalan sampai kondisi turun';
+  }
+  if (t.butuh_aerasi && !t.udara_layak) {
+    if (t.rh_masuk != null && t.rh_masuk > 70) return `Ditunda: udara masuk terlalu lembap (RH ${fmt(t.rh_masuk, 0)} %)`;
+    return 'Ditunda: udara masuk kurang sejuk';
+  }
+  if (t.butuh_aerasi) return 'Menunggu jeda minimum sebelum menyala';
+  return 'Tidak perlu aerasi saat ini';
+}
+
+function lamaJam(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const j = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60);
+  return j ? `${j}:${p2(m)}:${p2(s % 60)}` : `${p2(m)}:${p2(s % 60)}`;
+}
+
+function renderDurasiBlower() {
+  const t = st.t;
+  if (!t) return;
+  const ev = st.kejadian.find((k) => k.jenis === 'blower');
+  const cocok = ev && !!ev.data.blower === !!t.blower;
+  $('#blower-durasi').textContent = cocok ? lamaJam(kini() - ev.ts) : '--:--';
+  $('#blower-sejak').textContent = cocok
+    ? `lama ${t.blower ? 'menyala' : 'mati'} · sejak ${jam(ev.ts)}`
+    : 'belum ada catatan perubahan';
+}
+
+// syarat aerasi Tabel 3.5 beserta nilainya (✓ terpenuhi, ✕ tidak)
+function renderAturan(t) {
+  const ada = (...v) => v.every((x) => x != null);
+  const cek = (ok, adaNilai) => (!adaNilai ? '' : ok ? 'ya' : 'tidak');
+  const selisih = ada(t.t_dalam, t.t_masuk) ? t.t_dalam - t.t_masuk : null;
+  const kepala = (judul, ok) => `<li class="kelompok ${ok ? 'ya' : 'tidak'}"><span>${judul}</span><b>${ok ? 'YA' : 'TIDAK'}</b></li>`;
+  const baris = (k, nama, nilai) => `<li class="${k}"><span>${nama}</span><b>${nilai}</b></li>`;
+  $('#aturan').innerHTML = [
+    kepala('Butuh aerasi <small>(salah satu)</small>', !!t.butuh_aerasi),
+    baris(cek(t.t_dalam >= 28, ada(t.t_dalam)), 'Suhu ruang ≥ 28 °C', `${fmt(t.t_dalam)} °C`),
+    baris(cek(t.co2 >= 1500, ada(t.co2)), `${esc(st.labelCo2)} ≥ 1500 ppm selama 3 detik`, `${t.co2 == null ? '—' : fmt(t.co2, 0)} ppm`),
+    kepala('Udara masuk layak <small>(keduanya)</small>', !!t.udara_layak),
+    baris(cek(t.rh_masuk <= 70, ada(t.rh_masuk)), 'RH udara masuk ≤ 70 %', `${fmt(t.rh_masuk)} %`),
+    baris(cek(selisih >= 3, selisih != null), 'Udara masuk ≥ 3 °C lebih dingin', selisih == null ? '—' : `${fmt(selisih)} °C`),
+  ].join('');
 }
 
 function renderAerasi() {
@@ -238,17 +321,10 @@ function renderAerasi() {
   const bs = $('#blower-status');
   bs.classList.toggle('nyala', !!t.blower);
   bs.classList.toggle('mati', !t.blower);
-  $('#blower-teks').textContent = t.blower ? 'Blower MENYALA' : 'Blower MATI';
-  const ev = st.kejadian.find((k) => k.jenis === 'blower');
-  $('#blower-sejak').textContent = ev && !!ev.data.blower === !!t.blower
-    ? `sejak ${jam(ev.ts)} (${lama(kini() - ev.ts)})` : '';
-
-  $('#v-tmasuk').textContent = fmt(t.t_masuk, 1);
-  $('#v-rhmasuk').textContent = fmt(t.rh_masuk, 1);
-  const pil = (el, v) => { el.classList.toggle('ya', !!v); el.classList.toggle('tidak', !v); };
-  pil($('#syarat-butuh'), t.butuh_aerasi);
-  pil($('#syarat-layak'), t.udara_layak);
-  $('#alasan').textContent = t.alasan || '—';
+  $('#blower-teks').textContent = t.blower ? 'MENYALA' : 'MATI';
+  renderDurasiBlower();
+  renderAturan(t);
+  $('#alasan').textContent = ringkasAlasan(t);
   $('#alasan').title = t.alasan || '';
 
   const chips = [`<span class="${t.mode === 'MANUAL' ? 'manual' : ''}">${esc(t.mode)}</span>`];
@@ -258,11 +334,13 @@ function renderAerasi() {
 
   const btn = $('#btn-blower');
   btn.classList.toggle('mati', !!t.blower);
-  btn.querySelector('span').textContent = t.blower ? `Matikan · ${menitManual()} mnt` : `Nyalakan · ${menitManual()} mnt`;
+  btn.querySelector('span').textContent = t.blower ? `Matikan · ${lamaManual()}` : `Nyalakan · ${lamaManual()}`;
 
   $('#mode-kontrol').textContent = t.mode + (t.demo ? ' + DEMO' : '');
   $('#mode-kontrol').className = `pil-kecil ${t.mode === 'MANUAL' ? 'waspada' : ''}`;
   $('[data-cmd="auto"]').classList.toggle('aktif', t.mode === 'AUTO');
+  $('#btn-manual-on').closest('.btn-kontrol').classList.toggle('aktif', t.mode === 'MANUAL' && !!t.blower);
+  $('#btn-manual-off').classList.toggle('aktif', t.mode === 'MANUAL' && !t.blower);
 }
 
 function renderSensor() {
@@ -294,31 +372,177 @@ function renderSensor() {
   pr.className = `pil-kecil ${p === 'waspada' ? 'waspada' : p === 'tinggi' ? 'tinggi' : ''}`;
 }
 
-function renderGauge() {
+// ============================== TANGKI ===============================
+//  Isi tangki = massa load cell / kapasitas wadah (proposal 3.1: ~11 kg gabah).
+//  Kadar air menentukan efek basah pada gabah (warna gelap, kabut, embun).
+const TANGKI = { lantai: 372, tinggi: 268 };       // koordinat SVG: lantai berlubang & tinggi isi penuh
+const AIR = { min: 10, maks: 20, aman: 14, basah: 16 };
+const persenAir = (v) => Math.max(0, Math.min(100, ((v - AIR.min) / (AIR.maks - AIR.min)) * 100));
+
+function gambarSkala() {
+  const kap = st.kapasitasG / 1000;
+  const garis = [];
+  for (let i = 0; i <= 20; i++) {
+    const f = i / 20;
+    const y = (TANGKI.lantai - f * TANGKI.tinggi).toFixed(1);
+    const besar = i % 5 === 0;
+    garis.push(`<line ${besar ? '' : 'class="kecil"'} x1="290" x2="${besar ? 300 : 296}" y1="${y}" y2="${y}"/>`);
+    if (besar) garis.push(`<text x="305" y="${(+y + 3.5).toFixed(1)}">${fmt(kap * f, (kap * f) % 1 ? 1 : 0)} kg</text>`);
+  }
+  $('#skala').innerHTML = garis.join('');
+  $('#v-kapasitas').textContent = fmt(kap, kap % 1 ? 1 : 0);
+}
+
+function buatEmbun() {               // titik embun di dinding (posisi tetap, dibuat sekali)
+  let benih = 7;
+  const acak = () => { benih = (benih * 9301 + 49297) % 233280; return benih / 233280; };
+  const isi = [];
+  for (let i = 0; i < 16; i++) {
+    const x = acak() < 0.5 ? 79 + acak() * 9 : 272 + acak() * 9;
+    const y = 104 + acak() * 250;
+    const r = 1.2 + acak() * 1.6;
+    isi.push(`<ellipse cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" rx="${r.toFixed(1)}" ry="${(r * 1.25).toFixed(1)}"/>`);
+    if (r > 2.4) isi.push(`<path class="alur-tetes" d="M${x.toFixed(1)} ${(y + r * 1.2).toFixed(1)}v${(8 + acak() * 16).toFixed(0)}"/>`);
+  }
+  $('#embun').innerHTML = isi.join('');
+}
+
+function buatGelembung() {           // udara aerasi naik dari lantai berlubang saat blower nyala
+  const x = [96, 122, 148, 170, 192, 214, 236, 258, 110, 246];
+  $('#udara').innerHTML = x.map((cx, i) => `<circle cx="${cx}" cy="368" r="${2 + (i % 3)}"/>`).join('');
+}
+
+function buatKipas() {               // kipas besar 5 bilah lengkung, berputar saat blower nyala
+  const bilah = [];
+  for (let i = 0; i < 5; i++) {
+    bilah.push(`<path transform="rotate(${i * 72})" d="M-6 -14 C -13 -38 -19 -60 -13 -78 Q 14 -86 40 -68 C 26 -50 15 -31 7 -14 Z"/>`);
+  }
+  $('#kipas-besar').innerHTML = bilah.join('');
+}
+
+function kategoriAir(v) {
+  if (v < 12) return ['kering', 'Kering'];
+  if (v <= AIR.aman) return ['aman', 'Aman'];
+  if (v <= AIR.basah) return ['lembap', 'Lembap'];
+  return ['basah', 'Basah'];
+}
+
+function renderTangki() {
   const t = st.t;
-  const g = $('#gauge');
-  const aman = $('#gauge-aman'), nilai = $('#gauge-nilai');
-  const MIN = 8, MAKS = 22, BATAS = 14;
-  const persen = (v) => Math.max(0, Math.min(100, ((v - MIN) / (MAKS - MIN)) * 100));
+  const svg = $('#tangki');
+  const ada = t.massa_g != null;
+  const f = ada ? Math.max(0, Math.min(1, t.massa_g / st.kapasitasG)) : 0;
+  $('#gabah').style.transform = `translateY(${((1 - f) * TANGKI.tinggi).toFixed(1)}px)`;
+  $('#penunjuk').style.transform = `translateY(${(TANGKI.lantai - f * TANGKI.tinggi).toFixed(1)}px)`;
+  $('#udara').style.setProperty('--naik', `-${Math.max(20, f * TANGKI.tinggi - 6).toFixed(0)}px`);
+  svg.classList.toggle('kosong', !ada);
+  svg.classList.toggle('nyala', !!t.blower);
+  // animasi naik-turun baru aktif setelah posisi pertama tergambar (tidak meluncur dari kosong saat dibuka)
+  if (!svg.classList.contains('siap')) requestAnimationFrame(() => requestAnimationFrame(() => svg.classList.add('siap')));
+
+  const persen = ada ? Math.max(0, (t.massa_g / st.kapasitasG) * 100) : null;
+  $('#penunjuk-teks').textContent = ada ? `${fmt(persen, 0)}%` : '—';
+  $('#v-persen').textContent = ada ? `${fmt(persen, 0)}%` : '—';
+  $('.persen-isi').classList.toggle('penuh', ada && persen >= 95);
+
+  // ---- kadar air -> efek basah pada tangki + ubin kadar air ----
   const kal = t.sensor?.kapasitif === 'ok' && t.kadar_air != null;
-  g.classList.toggle('belum', !kal);
+  const w = kal ? Math.max(0, Math.min(1, (t.kadar_air - 13) / 5)) : 0;   // 0..1: mulai di 13 %, penuh di 18 %
+  const naik = (a, b) => Math.max(0, Math.min(1, (w - a) / (b - a))).toFixed(2);
+  $('#gabah-basah').setAttribute('opacity', w.toFixed(2));
+  $('#kabut').setAttribute('opacity', naik(0.3, 1));
+  $('#embun').setAttribute('opacity', naik(0.2, 0.7));
+  const lbl = $('#label-permukaan');
+  lbl.textContent = kal && t.kadar_air > AIR.basah ? 'BASAH' : 'LEMBAP';
+  lbl.setAttribute('opacity', kal && t.kadar_air > AIR.aman ? '1' : '0');
+
+  const ubin = $('#kadar');
+  const pil = $('#v-kadar-status');
+  const penanda = $('#air-penanda');
+  ubin.classList.toggle('belum', !kal);
+  ubin.classList.toggle('waspada', kal && t.kadar_air > AIR.aman && t.kadar_air <= AIR.basah);
+  ubin.classList.toggle('bahaya', kal && t.kadar_air > AIR.basah);
   if (!kal) {
-    aman.style.display = nilai.style.display = 'none';
     $('#v-kadar').textContent = t.kap_adc != null ? `ADC ${t.kap_adc}` : '—';
-    $('#v-kadar-ket').textContent = t.sensor?.kapasitif === 'gangguan' ? 'sensor gangguan' : 'belum kalibrasi · angka mentah';
+    $('#v-kadar-ket').textContent = t.sensor?.kapasitif === 'gangguan' ? 'Sensor gangguan' : 'Belum kalibrasi · angka mentah (Subbab 3.8)';
+    pil.textContent = t.sensor?.kapasitif === 'gangguan' ? 'Gangguan' : 'Belum kalibrasi';
+    pil.className = 'pil-air';
+    penanda.style.display = 'none';
     return;
   }
   const v = t.kadar_air;
-  const pAman = persen(Math.min(v, BATAS));
-  aman.style.display = pAman > 0 ? '' : 'none';
-  aman.setAttribute('stroke-dasharray', `${pAman} 100`);
-  if (v > BATAS) {
-    nilai.style.display = '';
-    nilai.setAttribute('stroke-dasharray', `${persen(v) - pAman} 100`);
-    nilai.setAttribute('stroke-dashoffset', `${-pAman}`);
-  } else nilai.style.display = 'none';
-  $('#v-kadar').textContent = `${fmt(v, 1)}%`;
-  $('#v-kadar-ket').textContent = v <= BATAS ? 'aman untuk disimpan' : 'perlu pengeringan';
+  const [kelas, nama] = kategoriAir(v);
+  $('#v-kadar').textContent = fmt(v, 1);
+  $('#v-kadar-ket').innerHTML = v <= AIR.aman ? 'Aman untuk disimpan (≤ 14 %)'
+    : `${fmt(v - AIR.aman, 1)} poin di atas batas aman, perlu dikeringkan`;
+  pil.textContent = nama;
+  pil.className = `pil-air ${kelas}`;
+  penanda.style.display = 'block';
+  penanda.style.left = `${persenAir(v)}%`;
+}
+
+// grafik mini 1 jam di tiap ubin sensor
+function renderSpark() {
+  const titik = st.satuJam?.titik || [];
+  $$('.spark').forEach((svg) => {
+    const k = svg.dataset.k;
+    const p = titik.filter((x) => x[k] != null);
+    if (p.length < 3) { svg.innerHTML = ''; return; }
+    const t0 = p[0].ts, t1 = p[p.length - 1].ts || t0 + 1;
+    let mn = Math.min(...p.map((x) => x[k])), mx = Math.max(...p.map((x) => x[k]));
+    const minRentang = { kadar_air: 1.5, t_dalam: 2, rh_dalam: 4, co2: 200 }[k] || 1;
+    if (mx - mn < minRentang) { const c = (mx + mn) / 2; mn = c - minRentang / 2; mx = c + minRentang / 2; }
+    const X = (ts) => ((ts - t0) / Math.max(1, t1 - t0)) * 200;
+    const Y = (v) => 40 - ((v - mn) / (mx - mn)) * 34;
+    const langkah = Math.max(1, Math.floor(p.length / 120));
+    const d = p.filter((_, i) => i % langkah === 0 || i === p.length - 1)
+      .map((x, i) => `${i ? 'L' : 'M'}${X(x.ts).toFixed(1)} ${Y(x[k]).toFixed(1)}`).join('');
+    svg.innerHTML = `<path class="spark-isi" d="${d}L200 44L0 44Z"/><path class="spark-garis" d="${d}"/>`;
+  });
+}
+
+// teks firmware memakai titik desimal & simbol ASCII; rapikan untuk dibaca
+const rapikanAlasan = (teks) => String(teks ?? '')
+  .replace(/(\d)\.(\d)/g, '$1,$2').replace(/(\d) ?C\b/g, '$1 °C')
+  .replace(/<=/g, '≤').replace(/>=/g, '≥').replace(/\bCO2\b/g, 'CO₂').replace(/(\d)%/g, '$1 %');
+
+const NAMA_SENSOR = { sht_dalam: 'Sensor suhu ruang', sht_masuk: 'Sensor udara masuk', co2: 'Sensor CO₂', hx711: 'Load cell', kapasitif: 'Sensor kadar air' };
+
+// ringkasan kondisi dalam kalimat biasa (paling penting dulu)
+function renderKondisi() {
+  const t = st.t;
+  let tingkat = 'baik', judul = 'Kondisi aman', teks = 'Gabah aman disimpan. Semua sensor membaca normal.';
+  const kal = t && t.sensor?.kapasitif === 'ok' && t.kadar_air != null;
+  if (!t) { tingkat = 'netral'; judul = 'Menunggu data'; teks = 'Dashboard menunggu data pertama dari ESP32.'; }
+  else if (basi() || st.esp.status === 'offline') { tingkat = 'buruk'; judul = 'Data tidak masuk'; teks = `Tidak ada data baru dari ESP32 selama ${lama(kini() - t.diterima)}. Angka di bawah adalah data terakhir.`; }
+  else if (t.alarm_co2) { tingkat = 'buruk'; judul = `${st.labelCo2} sangat tinggi`; teks = `${fmt(t.co2, 0)} ppm, di atas 3000 ppm. Periksa silo secara manual.`; }
+  else if (Object.values(t.sensor || {}).includes('gangguan')) {
+    const rusak = Object.entries(t.sensor).filter(([, v]) => v === 'gangguan').map(([k]) => NAMA_SENSOR[k] || k);
+    tingkat = 'buruk'; judul = 'Sensor bermasalah'; teks = `${rusak.join(', ')} tidak terbaca. Keputusan otomatis bisa terganggu, periksa kabel sensor.`;
+  } else if (kal && t.kadar_air > AIR.aman) {
+    tingkat = t.kadar_air > AIR.basah ? 'buruk' : 'waspada';
+    judul = t.kadar_air > AIR.basah ? 'Gabah basah' : 'Gabah terlalu lembap';
+    teks = `Kadar air ${fmt(t.kadar_air)} %, batas aman ${AIR.aman} %. ` +
+      (t.blower ? 'Blower sedang menyala.' : t.butuh_aerasi && !t.udara_layak ? `${ringkasAlasan(t).replace('Ditunda: ', 'Aerasi tertunda karena ')}.` : 'Pantau kadar air dan keringkan gabah bila terus naik.');
+  } else if (t.t_dalam != null && t.t_dalam >= 28) {
+    tingkat = 'waspada'; judul = 'Ruang simpan panas';
+    teks = `Suhu ruang ${fmt(t.t_dalam)} °C. ` + (t.blower ? 'Blower sedang mendinginkan.' : `${ringkasAlasan(t)}.`);
+  } else if (t.co2 != null && t.co2 >= 1500) {
+    tingkat = 'waspada'; judul = `${st.labelCo2} naik`; teks = `${fmt(t.co2, 0)} ppm. Bila bertahan 3 detik, blower menyala untuk mengganti udara.`;
+  } else if (t.prioritas === 'waspada') {
+    tingkat = 'waspada'; judul = 'Perlu perhatian'; teks = 'Lihat kartu Peringatan & Prioritas di bawah.';
+  }
+  // CLAUDE.md §6.7: alarm wajib mencolok untuk alarm_co2 dan prioritas tinggi
+  if (t?.prioritas === 'tinggi' && tingkat !== 'buruk') {
+    const aman = tingkat === 'baik';
+    tingkat = 'buruk';
+    judul = aman ? 'Prioritas pemeriksaan TINGGI' : `${judul} · prioritas TINGGI`;
+    teks = `${aman ? '' : `${teks} `}ESP32 menandai penyimpangan yang bertahan setelah aerasi. Lakukan pemeriksaan manual silo.`;
+  }
+  if (t?.simulasi) teks += ' Sebagian nilai berasal dari SIMULASI.';
+  $('#kondisi').dataset.tingkat = tingkat;
+  $('#kondisi-judul').textContent = judul;
+  $('#kondisi-teks').textContent = teks;
 }
 
 function renderBanner() {
@@ -331,15 +555,7 @@ function renderBanner() {
   $('#status-sim').textContent = t.simulasi ? 'AKTIF' : 'Nonaktif';
   $('#status-sim').className = `pil-kecil ${t.simulasi ? 'oranye-pil' : ''}`;
 
-  const alarm = $('#banner-alarm');
-  if (t.alarm_co2) {
-    $('#banner-alarm-judul').textContent = `ALARM ${st.labelCo2}`;
-    $('#banner-alarm-teks').textContent = `${fmt(t.co2, 0)} ppm melewati 3000 ppm — lakukan pemeriksaan manual silo.`;
-  } else if (t.prioritas === 'tinggi') {
-    $('#banner-alarm-judul').textContent = 'PRIORITAS TINGGI';
-    $('#banner-alarm-teks').textContent = t.alasan || '';
-  }
-  alarm.hidden = !(t.alarm_co2 || t.prioritas === 'tinggi');
+  // banner alarm (alarm_co2 / prioritas tinggi) = bilah kondisi merah, lihat renderKondisi()
 
   const demo = !!t.demo;
   $('.promo').classList.toggle('aktif', demo);
@@ -352,10 +568,11 @@ function renderBanner() {
 function renderTelemetri() {
   renderKoneksi();
   renderSensor();
+  renderKondisi();
   if (!st.t) return;
   renderStat();
   renderAerasi();
-  renderGauge();
+  renderTangki();
   renderBanner();
 }
 
@@ -375,6 +592,8 @@ function tikDetik() {
     usia.classList.toggle('basi', basi());
   }
   renderKoneksi();
+  renderKondisi();
+  renderDurasiBlower();
 }
 
 // ============================== KEJADIAN =============================
@@ -526,15 +745,18 @@ const METRIK = {
     ambang: [{ v: 70, teks: 'syarat masuk ≤ 70 %' }, { v: 75, teks: 'mati > 75 %' }] },
   co2: { satuan: 'ppm', des: 0, minRentang: 200, batas: [0, 10000], seri: [{ k: 'co2', nama: 'CO₂', warna: WARNA.g700 }],
     ambang: [{ v: 1500, teks: 'aerasi ≥ 1500' }, { v: 3000, teks: 'alarm > 3000', merah: true }] },
+  kadar: { satuan: '%', des: 1, minRentang: 1.5, batas: [0, 40], seri: [{ k: 'kadar_air', nama: 'Kadar air gabah', warna: WARNA.g700 }],
+    ambang: [{ v: 14, teks: 'batas aman 14 %' }, { v: 16, teks: 'basah > 16 %', merah: true }] },
   massa: { satuan: 'g', des: 0, minRentang: 20, batas: [0, 1e6], seri: [{ k: 'massa_g', nama: 'Massa gabah', warna: WARNA.g700 }], ambang: [] },
 };
 
 async function muatRiwayat() {
   try {
-    const ambil = (r) => fetch(`/api/riwayat?rentang=${r}`).then((x) => x.json());
+    const ambil = (r) => fetch(api(`/api/riwayat?rentang=${r}`)).then((x) => x.json());
     st.satuJam = await ambil('1h');
     st.riwayat = st.rentang === '1h' ? st.satuJam : await ambil(st.rentang);
     gambarGrafik();
+    renderSpark();
     if (st.t) renderStat();
   } catch { /* server belum siap, dicoba lagi pada siklus berikutnya */ }
 }
@@ -549,6 +771,7 @@ function tambahTitikLangsung(t) {
   s.dari = s.sampai - 3600e3;
   while (s.titik.length && s.titik[0].ts < s.dari) s.titik.shift();
   if (st.rentang === '1h') gambarGrafik();
+  renderSpark();
 }
 
 function hitungProyeksi(titik, k, dari, sampai, batas) {
@@ -731,7 +954,7 @@ function renderLegenda(m, adaSim, proy) {
   const lajuJam = proy.lajuMenit * 60;
   let teks = `Proyeksi ${lama(proy.horizon)} ke depan: <b>${fmt(proy.v2, m.des)} ${m.satuan}</b> ` +
     `(laju ${lajuJam >= 0 ? '+' : '−'}${fmt(Math.abs(lajuJam), m.des)} ${m.satuan}/jam).`;
-  const target = { suhu: 28, co2: 3000 }[st.metrik];
+  const target = { suhu: 28, co2: 3000, kadar: 14 }[st.metrik];
   if (target && proy.v1 < target && proy.lajuMenit > 0) {
     const menit = (target - proy.v1) / proy.lajuMenit;
     if (menit < 24 * 60) teks += ` Diperkirakan mencapai ${fmt(target, 0)} ${m.satuan} dalam ±${lama(menit * 60e3)}.`;
@@ -788,7 +1011,9 @@ function terapkanLabelCo2() {
 }
 
 function sambung() {
-  const es = new EventSource('/api/stream');
+  if (st.es) st.es.close();             // pindah silo: tutup aliran silo sebelumnya
+  const es = new EventSource(api('/api/stream'));
+  st.es = es;
   es.onopen = () => { st.serverOk = true; renderKoneksi(); };
   es.onerror = () => { st.serverOk = false; renderKoneksi(); };
 
@@ -796,7 +1021,10 @@ function sambung() {
     const d = JSON.parse(e.data);
     st.serverOk = true;
     st.labelCo2 = d.konfig.labelCo2;
+    if (d.konfig.kapasitasG > 0) st.kapasitasG = d.konfig.kapasitasG;
+    gambarSkala();
     st.silo = d.konfig.silo;
+    st.multiSilo = (d.daftarSilo || []).length > 1;
     st.selisihJam = d.waktuServer - Date.now();
     st.mqtt = d.mqtt;
     st.esp = d.esp;
@@ -809,6 +1037,8 @@ function sambung() {
     renderBatch();
     $('#silo-id').textContent = st.silo;
     $('#topik-cmd').textContent = `grainsense/${st.silo}/cmd`;
+    $('#judul-silo').textContent = st.multiSilo ? namaSilo(st.silo) : 'Dashboard';
+    document.title = `${namaSilo(st.silo)} · GrainSense${window.GS_DEMO ? ' (DEMO)' : ''}`;
     terapkanLabelCo2();
     renderKejadian();
     renderTelemetri();
@@ -884,7 +1114,7 @@ function pasangUi() {
     if ($('#dlg-batch').returnValue !== 'ok') return;
     const isi = { kode: $('#b-kode').value, tanggal_masuk: $('#b-tanggal').value, asal: $('#b-asal').value,
       kondisi_awal: $('#b-kondisi').value, catatan: $('#b-catatan').value };
-    const r = await fetch('/api/batch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(isi) }).catch(() => null);
+    const r = await fetch(api('/api/batch'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(isi) }).catch(() => null);
     const j = await r?.json().catch(() => ({}));
     if (r?.ok) toast(`Kelompok gabah ${j.kode} disimpan`);
     else toast(j?.galat || 'Gagal menyimpan kelompok gabah', 'buruk');
@@ -898,11 +1128,42 @@ function pasangUi() {
   $$('[data-buka]').forEach((el) => el.addEventListener('click', (e) => { e.preventDefault(); $(`#${el.dataset.buka}`).showModal(); }));
   $('#dlg-ekspor').addEventListener('close', () => {
     if ($('#dlg-ekspor').returnValue !== 'ok') return;
-    const alamat = `/api/ekspor.csv?jenis=${$('#ekspor-jenis').value}&rentang=${$('#ekspor-rentang').value}`;
-    if (window.GS_DEMO) window.GS_DEMO.unduh(alamat);   // mode demo: CSV dibuat di browser
-    else window.location.href = alamat;
+    unduh(api(`/api/ekspor.csv?jenis=${$('#ekspor-jenis').value}&rentang=${$('#ekspor-rentang').value}`));
   });
+  $('#btn-csv-log').addEventListener('click', () => unduh(api('/api/ekspor.csv?jenis=kejadian&rentang=72h')));
   $('#menu-sinkron').addEventListener('click', (e) => { e.preventDefault(); sinkronWaktu(); });
+
+  // mode presentasi: satu layar besar untuk proyektor / layar juri (1366x768)
+  const aturPresentasi = (on) => {
+    document.body.classList.toggle('presentasi', on);
+    $('#menu-presentasi').lastChild.textContent = on ? 'Keluar Presentasi' : 'Mode Presentasi';
+    $('#btn-presentasi').classList.toggle('aktif', on);
+    try { localStorage.setItem('gs-presentasi', on ? '1' : '0'); } catch { /* boleh gagal */ }
+    requestAnimationFrame(gambarGrafik);
+  };
+  let awalPresentasi = new URLSearchParams(location.search).has('presentasi');
+  try { awalPresentasi = awalPresentasi || localStorage.getItem('gs-presentasi') === '1'; } catch { /* boleh gagal */ }
+  aturPresentasi(awalPresentasi);
+  const tukarPresentasi = (e) => { e.preventDefault(); aturPresentasi(!document.body.classList.contains('presentasi')); };
+  $('#btn-presentasi').addEventListener('click', tukarPresentasi);
+  $('#menu-presentasi').addEventListener('click', tukarPresentasi);
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && document.body.classList.contains('presentasi') && !document.querySelector('dialog[open]')) aturPresentasi(false);
+  });
+
+  // strip semua silo: pindah silo tanpa memuat ulang halaman
+  $('#daftar-silo').addEventListener('click', (e) => {
+    const a = e.target.closest('.kartu-silo');
+    if (!a || e.ctrlKey || e.metaKey || e.shiftKey) return;
+    e.preventDefault();
+    if (a.dataset.silo === st.silo) return;
+    SILO_PILIH = a.dataset.silo;
+    try { history.replaceState(null, '', a.getAttribute('href')); } catch { /* boleh gagal */ }
+    $$('.kartu-silo').forEach((k) => k.classList.toggle('aktif', k === a));
+    st.satuJam = st.riwayat = null;
+    sambung();
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
   $('#btn-sinkron-2').addEventListener('click', sinkronWaktu);
 
   // kontrol
@@ -931,7 +1192,8 @@ function pasangUi() {
     aksi({ judul: 'Aktifkan simulasi?', pesan: 'Nilai berikut menggantikan bacaan sensor untuk logika aerasi. Data akan ditandai SIMULASI.', perintah: daftar, tombol: 'Aktifkan simulasi' });
   });
   const SKENARIO = {
-    panas: { perintah: ['sim tdalam 32', 'sim tmasuk 26', 'sim rhmasuk 65'], pesan: 'Ruang 32 °C, udara masuk 26 °C & RH 65 % → blower seharusnya NYALA (setelah durasi minimum mati terpenuhi).' },
+    panas: { perintah: ['sim tdalam 32', 'sim tmasuk 26', 'sim rhmasuk 65'], pesan: 'Ruang 32 °C, udara masuk 26 °C & RH 65 % → blower FISIK akan menyala (mode AUTO).' },
+  basah: { perintah: ['sim ka 20'], pesan: 'Kadar air 20 % → blower FISIK akan menyala dalam beberapa detik (mode AUTO), sampai simulasi dimatikan.' },
     lembap: { perintah: ['sim tdalam 32', 'sim tmasuk 27', 'sim rhmasuk 80'], pesan: 'Ruang 32 °C tetapi udara masuk RH 80 % → blower seharusnya DITUNDA / MATI.' },
     co2: { perintah: ['sim co2 3200'], pesan: `${st.labelCo2} 3200 ppm → alarm pemeriksaan manual & prioritas tinggi.` },
   };
@@ -944,9 +1206,65 @@ function pasangUi() {
   $('#btn-banner-simoff').addEventListener('click', simOff);
 }
 
+// ============================ SEMUA SILO =============================
+//  Satu dashboard bisa memantau beberapa silo (SILO_ID=silo01,silo02 di server).
+//  Strip ini merangkum semua silo; klik kartu untuk membuka detail silo itu.
+function tingkatSilo(x) {
+  const t = x.terakhir;
+  const online = x.esp?.status === 'online' && t && kini() - (t.diterima || t.ts || 0) < 60e3;
+  if (!online) return 'offline';
+  // aturan sama dengan bilah kondisi: merah untuk alarm CO₂, prioritas tinggi, gabah basah, atau sensor rusak
+  const rusak = Object.values(t.sensor || {}).includes('gangguan');
+  if (t.alarm_co2 || t.prioritas === 'tinggi' || t.kadar_air > AIR.basah || rusak) return 'bahaya';
+  if (x.peringatan?.waspada || t.kadar_air > AIR.aman || t.t_dalam >= 28 || t.co2 >= 1500) return 'waspada';
+  return 'normal';
+}
+
+function kartuSilo(x, aktif) {
+  const t = x.terakhir || {};
+  const tingkat = tingkatSilo(x);
+  const persen = t.massa_g != null ? Math.max(0, Math.min(100, (t.massa_g / x.kapasitasG) * 100)) : null;
+  const kal = t.sensor?.kapasitif === 'ok' && t.kadar_air != null;
+  const lebih = (cek) => (cek ? ' class="lebih"' : '');
+  const q = new URLSearchParams(location.search);
+  q.set('silo', x.silo);
+  const status = { offline: 'OFFLINE', bahaya: 'ALARM', waspada: 'WASPADA', normal: 'NORMAL' }[tingkat];
+  return `<a class="kartu-silo ${tingkat}${aktif ? ' aktif' : ''}" href="?${q}" data-silo="${esc(x.silo)}" ${aktif ? 'aria-current="page"' : ''}>
+    <div class="ks-kepala"><b>${esc(namaSilo(x.silo))}</b><span class="ks-batch">${esc(x.batch?.kode || '—')}</span><span class="ks-status">${status}</span></div>
+    <div class="ks-isi">
+      <div class="ks-level" aria-hidden="true"><i style="height:${persen == null ? 0 : persen.toFixed(0)}%"></i></div>
+      <dl>
+        <div><dt>Berat</dt><dd><b>${t.massa_g == null ? '—' : fmt(t.massa_g / 1000, 2)}</b> kg <small>${persen == null ? '' : `${fmt(persen, 0)}%`}</small></dd></div>
+        <div><dt>Kadar air</dt><dd${lebih(kal && t.kadar_air > AIR.aman)}><b>${kal ? fmt(t.kadar_air, 1) : '—'}</b> %</dd></div>
+        <div><dt>Suhu</dt><dd${lebih(t.t_dalam >= 28)}><b>${fmt(t.t_dalam, 1)}</b> °C</dd></div>
+        <div><dt>${esc(x.labelCo2 || 'CO₂')}</dt><dd${lebih(t.co2 >= 1500)}><b>${t.co2 == null ? '—' : fmt(t.co2, 0)}</b> ppm</dd></div>
+        <div><dt>Blower</dt><dd><b class="${t.blower ? 'on' : ''}">${t.blower ? 'ON' : 'OFF'}</b></dd></div>
+      </dl>
+    </div>
+  </a>`;
+}
+
+async function muatSemuaSilo() {
+  const r = await fetch('/api/silo').then((x) => (x.ok ? x.json() : null)).catch(() => null);
+  const wadah = $('#semua-silo');
+  if (!r || !Array.isArray(r.silo) || r.silo.length < 2) { wadah.hidden = true; return; }   // satu silo: strip tidak perlu
+  wadah.hidden = false;
+  const aktif = SILO_PILIH || st.silo || r.silo[0]?.silo;
+  const jmlAlarm = r.silo.filter((x) => tingkatSilo(x) === 'bahaya').length;
+  const jmlWaspada = r.silo.filter((x) => tingkatSilo(x) === 'waspada').length;
+  $('#semua-silo-ket').textContent = `${r.silo.length} silo · ${jmlAlarm} alarm · ${jmlWaspada} waspada`;
+  $('#daftar-silo').innerHTML = r.silo.map((x) => kartuSilo(x, x.silo === aktif)).join('');
+}
+
 // ============================== MULAI ================================
+gambarSkala();
+buatEmbun();
+buatGelembung();
+buatKipas();
 pasangUi();
 sambung();
 tikDetik();
 setInterval(tikDetik, 1000);
+muatSemuaSilo();
+setInterval(muatSemuaSilo, 5000);
 setInterval(() => { if (st.rentang !== '1h') muatRiwayat(); else if (st.t) renderStat(); }, 60e3);

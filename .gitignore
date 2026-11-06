@@ -1,6 +1,9 @@
 # kredensial Wi-Fi (lihat rahasia.contoh.h)
 rahasia.h
 
+# arsip (mis. kiriman teman) tidak ikut di-upload
+*.zip
+
 # dashboard: dependensi & data riwayat lokal
 dashboard/node_modules/
 dashboard/data/

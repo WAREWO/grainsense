@@ -9,8 +9,8 @@
 //  oleh mode demo di browser).
 //
 //  Pemakaian:
-//    node simulator.js                 normal (durasi minimum 30 menit)
-//    node simulator.js --demo          langsung mode demo (durasi 60 detik)
+//    node simulator.js                 normal (durasi minimum 3 detik)
+//    node simulator.js --demo          langsung mode demo (durasi 3 detik)
 //    node simulator.js --backlog 20    kirim 20 data "offline" saat tersambung
 //    node simulator.js --tanpa-gangguan   matikan gangguan sensor acak
 //    node simulator.js --bocor         massa turun pelan tanpa transaksi (uji anomali stok)
@@ -20,7 +20,7 @@ const mqtt = require('mqtt');
 const { buatSimulator } = require('./public/sim-inti.js');
 
 const MQTT_URL = process.env.MQTT_URL || 'mqtt://127.0.0.1:1883';
-const SILO_ID = 'silo01';
+const SILO_ID = process.env.SILO_ID || 'silo01';   // jalankan beberapa simulator untuk menguji banyak silo
 
 const argv = process.argv.slice(2);
 let backlog = argv.includes('--backlog') ? Number(argv[argv.indexOf('--backlog') + 1]) || 20 : 0;

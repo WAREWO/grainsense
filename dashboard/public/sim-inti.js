@@ -16,9 +16,11 @@
 
   // ---- ambang Tabel 3.5 (sama dengan struct Ambang di firmware) ----
   const amb = { tNyala: 28, tMati: 25, co2Nyala: 1500, co2Lepas: 1200, co2Alarm: 3000,
-    rhMasukMaks: 70, rhMasukMati: 75, dtMin: 3, dtLepas: 0 };
-  const DEMO_DURASI_S = 60;
-  const MANUAL_DEFAULT_MENIT = 10, MANUAL_MAKS_MENIT = 30;
+    rhMasukMaks: 70, rhMasukMati: 75, dtMin: 3, dtLepas: 0,
+    kaNyala: 18, kaLepas: 16, rhMasukBasah: 85 };
+  const DEMO_DURASI_S = 3, DUR_KA_BERTAHAN_S = 3;
+  const DUR_PENYIMPANGAN_S = 60 * 60;
+  const MANUAL_DEFAULT_DETIK = 5, MANUAL_MAKS_MENIT = 30;
   const PEMANASAN_CO2_MS = 180e3, BEKU_SETELAH_MS = 15e3, TRANSAKSI_G = 20;
 
   function buatSimulator(opsi) {
@@ -32,7 +34,7 @@
     const kirim = opsi.kirim || (() => {});
     const log = opsi.log || (() => {});
 
-    let DUR_MIN_NYALA_S = 30 * 60, DUR_MIN_MATI_S = 30 * 60, DUR_CO2_BERTAHAN_S = 30 * 60;
+    let DUR_MIN_NYALA_S = 3, DUR_MIN_MATI_S = 3, DUR_CO2_BERTAHAN_S = 3;
 
     // ---- keadaan ----
     const tBoot = jam();
@@ -41,18 +43,20 @@
     const epochSekarang = () => (epochOffset === null ? 0 : Math.floor(millis() / 1000 + epochOffset));
 
     const fisik = {                                 // kondisi "nyata" di dalam silo
-      tDalam: 29.8, rhDalam: 69, co2: 950, massaKotor: 512, adc: 3108,
+      tDalam: 29.8, rhDalam: 69, co2: 950, massaKotor: 6400, adc: 3108, kadar: 15.8,
+      ...(opsi.awal || {}),                          // kondisi awal lain (demo beberapa silo)
     };
     const d = {                                     // hasil "pembacaan sensor"
       tDalam: null, rhDalam: null, tMasuk: null, rhMasuk: null, co2: null,
       massa: null, massaBeku: false, massaStabil: false, kapAdc: 3108, kadarAir: null,
       sDalam: 'ok', sMasuk: 'ok', sCo2: 'pemanasan', sHx: 'ok', sKap: 'ok',
     };
-    let sim = { aktif: false, tDalam: null, rhDalam: null, tMasuk: null, rhMasuk: null, co2: null };
+    let sim = { aktif: false, tDalam: null, rhDalam: null, tMasuk: null, rhMasuk: null, co2: null, ka: null };
 
     let mode = 'AUTO', manualNyala = false, manualSampaiMs = 0, modeDemo = false;
     let blowerNyala = false, msBlowerNyala = 0, msBlowerMati = 0, msCo2MulaiTinggi = 0;
     let butuhAerasi = false, udaraLayak = false, perluSetelahAerasi = false;
+    let modeLembap = false, msKaMulaiTinggi = 0, msKaTurun = 0;
     let alasan = 'Menunggu data sensor', prioritas = 'normal';
     let taraOffset = 0, massaTercatat = null, jendela = [];
     let transaksi = null;                            // {sisa, laju} saat gabah sedang dituang/diambil
@@ -68,13 +72,14 @@
     const nTMasuk = () => (sim.aktif && sim.tMasuk !== null ? sim.tMasuk : d.tMasuk);
     const nRhMasuk = () => (sim.aktif && sim.rhMasuk !== null ? sim.rhMasuk : d.rhMasuk);
     const nCo2 = () => (sim.aktif && sim.co2 !== null ? sim.co2 : d.co2);
+    const nKa = () => (sim.aktif && sim.ka !== null ? sim.ka : d.kadarAir);
     const okDalam = () => (sim.aktif && sim.tDalam !== null) || d.sDalam === 'ok';
     const okMasuk = () => (sim.aktif && sim.tMasuk !== null && sim.rhMasuk !== null) || d.sMasuk === 'ok';
     const okCo2 = () => (sim.aktif && sim.co2 !== null) || d.sCo2 === 'ok';
 
     function aturDemo(nyala) {
       modeDemo = nyala;
-      DUR_MIN_NYALA_S = DUR_MIN_MATI_S = DUR_CO2_BERTAHAN_S = nyala ? DEMO_DURASI_S : 30 * 60;
+      DUR_MIN_NYALA_S = DUR_MIN_MATI_S = DUR_CO2_BERTAHAN_S = nyala ? DEMO_DURASI_S : 3;
     }
 
     // ========================= FISIKA SEDERHANA ======================
@@ -103,7 +108,9 @@
       fisik.co2 += acak(-6, 6);
 
       if (!transaksi && Math.random() < dt / 300) {            // rata-rata tiap ~5 menit
-        const delta = Math.round(acak(25, 70)) * (Math.random() < 0.55 ? -1 : 1);
+        // gabah diambil/ditambah 120-450 g; makin penuh wadah (maks ~11 kg) makin sering diambil
+        const pKeluar = 0.25 + 0.5 * Math.min(1, Math.max(0, (fisik.massaKotor - 3000) / 6000));
+        const delta = Math.round(acak(120, 450)) * (Math.random() < pKeluar ? -1 : 1);
         transaksi = { sisa: delta, laju: delta / 4 };            // dituang selama ~8 detik
       }
       if (transaksi) {
@@ -113,6 +120,10 @@
         if (Math.abs(transaksi.sisa) < 0.5) transaksi = null;
       }
       if (opsi.bocor) fisik.massaKotor -= (0.8 / 60) * dt;     // ~0,8 g/menit, di bawah ambang transaksi
+      // kadar air gabah: turun pelan saat diaerasi, naik pelan bila ruang lembap (dipercepat agar demo terlihat)
+      if (blowerNyala) fisik.kadar -= 0.0002 * dt * (luar.rh < 72 ? 1 : 0.3);
+      else fisik.kadar += (fisik.rhDalam - 66) * 0.000015 * dt;
+      fisik.kadar = Math.min(19, Math.max(11.5, fisik.kadar));
       fisik.adc = 3108 + Math.round((fisik.rhDalam - 70) * 6 + acak(-4, 4));
 
       if (opsi.gangguan && !gangguanSampai && Math.random() < dt / 5400) {   // ~1x per 1,5 jam
@@ -129,7 +140,7 @@
       d.co2 = Math.round(fisik.co2);
       d.sCo2 = millis() < PEMANASAN_CO2_MS ? 'pemanasan' : 'ok';
       d.kapAdc = fisik.adc;
-      d.kadarAir = 14.2 + (fisik.rhDalam - 70) * 0.06 + acak(-0.05, 0.05);
+      d.kadarAir = fisik.kadar + acak(-0.05, 0.05);
       bacaMassa();
       evaluasiAerasi();
     }
@@ -172,7 +183,8 @@
           setBlower(false, 'Batas waktu manual habis');
         } else {
           setBlower(manualNyala, manualNyala ? 'Perintah manual operator' : 'Perintah manual operator (mati)');
-          alasan = `MANUAL: blower ${manualNyala ? 'nyala' : 'mati'}, sisa ${Math.floor((manualSampaiMs - now) / 60000) + 1} menit`;
+          const sisaDetik = Math.floor((manualSampaiMs - now) / 1000) + 1;
+          alasan = `MANUAL: blower ${manualNyala ? 'nyala' : 'mati'}, sisa ${sisaDetik < 60 ? `${sisaDetik} detik` : `${Math.floor(sisaDetik / 60) + 1} menit`}`;
           return;
         }
       }
@@ -193,6 +205,41 @@
       else if (!co2Valid || co2 < amb.co2Lepas) msCo2MulaiTinggi = 0;
       const co2Bertahan = !!msCo2MulaiTinggi && (now - msCo2MulaiTinggi) / 1000 >= DUR_CO2_BERTAHAN_S;
 
+      // ---- prioritas 1: gabah lembap (sama seperti firmware) ----
+      const ka = nKa();
+      const kaValid = ka !== null;
+      if (kaValid && ka >= amb.kaNyala) { if (!msKaMulaiTinggi) msKaMulaiTinggi = now || 1; }
+      else if (!kaValid || ka < amb.kaLepas) msKaMulaiTinggi = 0;
+      const kaBertahan = !!msKaMulaiTinggi && (now - msKaMulaiTinggi) / 1000 >= DUR_KA_BERTAHAN_S;
+      const butuhLembap = modeLembap ? (kaValid && ka >= amb.kaLepas) : kaBertahan;
+      const sKa = kaValid ? `kadar air ${f1(ka)}%` : 'kadar air n/a';
+      const alarmCo2 = co2Valid && co2 > amb.co2Alarm;
+      if (butuhLembap) {
+        const terlaluBasah = rhM > amb.rhMasukBasah;
+        msKaTurun = 0; butuhAerasi = true; udaraLayak = !terlaluBasah;
+        modeLembap = !terlaluBasah;
+        setBlower(!terlaluBasah, terlaluBasah ? `Udara masuk sangat basah (RH ${f1(rhM)}%)` : `Gabah lembap (${sKa})`);
+        alasan = terlaluBasah
+          ? `PRIORITAS LEMBAP: ${sKa}, tetapi udara masuk sangat basah (RH ${f1(rhM)}% > ${f1(amb.rhMasukBasah)}%), blower ditahan`
+          : `Blower nyala - PRIORITAS LEMBAP: ${sKa} (berhenti bila < ${f1(amb.kaLepas)}%)`;
+        prioritas = alarmCo2 ? 'tinggi' : 'waspada';
+        return;
+      }
+      if (modeLembap && blowerNyala) {
+        if (!msKaTurun) msKaTurun = now || 1;
+        const lamaTurun = Math.floor((now - msKaTurun) / 1000);
+        prioritas = alarmCo2 ? 'tinggi' : 'normal';
+        if (lamaTurun < DUR_KA_BERTAHAN_S) {
+          alasan = `Gabah tidak lembap lagi (${sKa}), blower mati dalam ${DUR_KA_BERTAHAN_S - lamaTurun} detik`;
+          return;
+        }
+        modeLembap = false; msKaTurun = 0;
+        setBlower(false, `Gabah tidak lembap lagi (${sKa})`);
+        alasan = `Blower mati: gabah tidak lembap lagi (${sKa}), kembali ke aturan suhu/CO2`;
+        return;
+      }
+      modeLembap = false;
+
       const butuhSuhu = blowerNyala ? tD > amb.tMati : tD >= amb.tNyala;
       const butuhCo2 = blowerNyala ? (co2Valid && co2 >= amb.co2Lepas && !!msCo2MulaiTinggi) : co2Bertahan;
       butuhAerasi = butuhSuhu || butuhCo2;
@@ -211,7 +258,7 @@
       if (!blowerNyala) {
         if (butuhAerasi && udaraLayak) {
           if (msBlowerMati !== 0 && lamaMati < DUR_MIN_MATI_S) {
-            alasan = `Aerasi perlu & udara layak, menunggu durasi minimum mati (${Math.floor((DUR_MIN_MATI_S - lamaMati) / 60) + 1} menit lagi)`;
+            alasan = `Aerasi perlu & udara layak, menunggu durasi minimum mati (${DUR_MIN_MATI_S - lamaMati} detik lagi)`;
           } else {
             const sebab = `Aerasi perlu (${detailButuh}) dan ${detailMasuk}`;
             setBlower(true, sebab);
@@ -220,7 +267,7 @@
         } else if (butuhAerasi) {
           alasan = `Blower DITUNDA: aerasi perlu (${detailButuh}) tetapi udara masuk tidak layak (${detailMasuk}; syarat RH <= ${f1(amb.rhMasukMaks)}% dan >= ${f1(amb.dtMin)} C lebih dingin)`;
         } else if (msCo2MulaiTinggi) {
-          alasan = `CO2 ${co2} ppm >= ${amb.co2Nyala}, dipantau (${Math.floor((now - msCo2MulaiTinggi) / 60000)}/${DUR_CO2_BERTAHAN_S / 60} menit)`;
+          alasan = `CO2 ${co2} ppm >= ${amb.co2Nyala}, dipantau (${Math.floor((now - msCo2MulaiTinggi) / 1000)}/${DUR_CO2_BERTAHAN_S} detik)`;
         } else {
           alasan = `Kondisi stabil: suhu ruang ${f1(tD)} C, CO2 ${co2Valid ? co2 + ' ppm' : 'n/a'}, aerasi tidak diperlukan`;
         }
@@ -231,7 +278,7 @@
         alasan = 'Blower mati: ' + sebab;
       } else if (!butuhAerasi) {
         if (lamaNyala < DUR_MIN_NYALA_S) {
-          alasan = `Kebutuhan aerasi selesai, menunggu durasi minimum nyala (${Math.floor((DUR_MIN_NYALA_S - lamaNyala) / 60) + 1} menit lagi)`;
+          alasan = `Kebutuhan aerasi selesai, menunggu durasi minimum nyala (${DUR_MIN_NYALA_S - lamaNyala} detik lagi)`;
         } else {
           perluSetelahAerasi = false;
           setBlower(false, `Kebutuhan aerasi selesai (suhu ruang ${f1(tD)} C)`);
@@ -239,7 +286,7 @@
         }
       } else {
         alasan = `Blower nyala: aerasi masih diperlukan (${detailButuh}), ${detailMasuk}`;
-        if (lamaNyala >= DUR_MIN_NYALA_S * 2) perluSetelahAerasi = true;
+        if (lamaNyala >= DUR_PENYIMPANGAN_S) perluSetelahAerasi = true;
       }
 
       if ((co2Valid && co2 > amb.co2Alarm) || perluSetelahAerasi) prioritas = 'tinggi';
@@ -257,7 +304,7 @@
         massa_g: angka(d.massa, 0), massa_beku: d.massaBeku, massa_stabil: d.massaStabil,
         t_dalam: angka(nTDalam(), 1), rh_dalam: angka(nRhDalam(), 1),
         t_masuk: angka(nTMasuk(), 1), rh_masuk: angka(nRhMasuk(), 1),
-        co2: co2 === null ? null : co2, kap_adc: d.kapAdc, kadar_air: angka(d.kadarAir, 1),
+        co2: co2 === null ? null : co2, kap_adc: d.kapAdc, kadar_air: angka(nKa(), 1),
         blower: blowerNyala, butuh_aerasi: butuhAerasi, udara_layak: udaraLayak,
         alasan, prioritas, alarm_co2: co2 !== null && co2 > amb.co2Alarm,
         sensor: { sht_dalam: d.sDalam, sht_masuk: d.sMasuk, co2: d.sCo2, hx711: d.sHx, kapasitif: d.sKap },
@@ -313,17 +360,17 @@
       if (a === 'status') log(JSON.stringify(buatTelemetri(), null, 1));
       else if (a === 'auto') { mode = 'AUTO'; kirimEvent('mode', { mode: 'AUTO' }); }
       else if (a === 'manual') {
-        let menit = c ? parseInt(c, 10) || MANUAL_DEFAULT_MENIT : MANUAL_DEFAULT_MENIT;
-        menit = Math.min(menit, MANUAL_MAKS_MENIT);
-        mode = 'MANUAL'; manualNyala = b === 'on'; manualSampaiMs = millis() + menit * 60000;
-        kirimEvent('mode', { mode: 'MANUAL', blower: manualNyala, menit });
+        let detik = (parseInt(c, 10) || 0) * (/d$/.test(c || '') ? 1 : 60);   // "5d" = 5 detik, "5" = 5 menit
+        detik = Math.min(detik || MANUAL_DEFAULT_DETIK, MANUAL_MAKS_MENIT * 60);
+        mode = 'MANUAL'; manualNyala = b === 'on'; manualSampaiMs = millis() + detik * 1000;
+        kirimEvent('mode', { mode: 'MANUAL', blower: manualNyala, ...(detik % 60 ? { detik } : { menit: detik / 60 }) });
       } else if (a === 'sim') {
         if (b === 'off') {
-          sim = { aktif: false, tDalam: null, rhDalam: null, tMasuk: null, rhMasuk: null, co2: null };
+          sim = { aktif: false, tDalam: null, rhDalam: null, tMasuk: null, rhMasuk: null, co2: null, ka: null };
           kirimEvent('simulasi', { aktif: false });
         } else {
           const v = parseFloat(c) || 0;
-          const kunci = { tdalam: 'tDalam', rhdalam: 'rhDalam', tmasuk: 'tMasuk', rhmasuk: 'rhMasuk', co2: 'co2' }[b];
+          const kunci = { tdalam: 'tDalam', rhdalam: 'rhDalam', tmasuk: 'tMasuk', rhmasuk: 'rhMasuk', co2: 'co2', ka: 'ka' }[b];
           if (!kunci) return log('Nama simulasi tidak dikenal');
           sim.aktif = true;
           sim[kunci] = kunci === 'co2' ? Math.round(v) : v;

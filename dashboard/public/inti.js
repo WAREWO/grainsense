@@ -27,8 +27,8 @@
 
   // Perintah yang boleh diteruskan ke ESP (sesuai firmware)
   const POLA_PERINTAH = new RegExp('^(' + [
-    'auto', 'manual (on|off)( \\d{1,2})?', 'demo (on|off)',
-    'sim (tdalam|rhdalam|tmasuk|rhmasuk|co2) -?\\d{1,5}(\\.\\d{1,2})?', 'sim off',
+    'auto', 'manual (on|off)( \\d{1,2}d?)?', 'demo (on|off)',
+    'sim (tdalam|rhdalam|tmasuk|rhmasuk|co2|ka) -?\\d{1,5}(\\.\\d{1,2})?', 'sim off',
     'tara', 'status', 'scan', 'wifi',
     'kal (lihat|hx nol|hx \\d{1,5}(\\.\\d)?|kap (list|hitung|reset|\\d{1,2}(\\.\\d)?)|sht (\\d{1,3}|batal|reset)|co2 (abc|nol ya))',
   ].join('|') + ')$');
@@ -62,7 +62,7 @@
       case 'blower': return `Blower ${d.blower ? 'MENYALA' : 'MATI'} (${d.mode || '-'}): ${d.alasan || ''}`;
       case 'transaksi': return `Gabah ${d.arah === 'masuk' ? 'masuk' : 'keluar'} ${Math.abs(d.delta_g)} g → massa ${d.massa_g} g`;
       case 'mode': return d.mode === 'MANUAL'
-        ? `Mode MANUAL: blower dipaksa ${d.blower ? 'nyala' : 'mati'} selama ${d.menit} menit`
+        ? `Mode MANUAL: blower dipaksa ${d.blower ? 'nyala' : 'mati'} selama ${d.detik ? `${d.detik} detik` : `${d.menit} menit`}`
         : 'Mode kembali AUTO';
       case 'manual_timeout': return d.pesan || 'Batas waktu mode manual habis, kembali ke AUTO';
       case 'simulasi': {
@@ -70,7 +70,7 @@
         const isi = Object.entries(d).filter(([k]) => k !== 'aktif').map(([k, v]) => `${k} = ${v}`).join(', ');
         return `Simulasi AKTIF: ${isi}`;
       }
-      case 'demo': return d.aktif ? 'Mode DEMO aktif (durasi minimum dipersingkat jadi 60 detik)' : 'Mode DEMO dimatikan';
+      case 'demo': return d.aktif ? 'Mode DEMO aktif (durasi minimum 3 detik)' : 'Mode DEMO dimatikan';
       case 'tara': return `Tara timbangan (offset ${d.offset})`;
       case 'online': return `ESP32 tersambung ke broker (${d.buffer} data offline akan dikirim)`;
       case 'status': return d.status === 'online' ? 'ESP32 ONLINE' : 'ESP32 OFFLINE (koneksi terputus)';
@@ -102,7 +102,7 @@
 
   // =====================================================================
   //  buatInti(opsi)
-  //   opsi.silo, opsi.labelCo2, opsi.dayaW, opsi.anomaliG
+  //   opsi.silo, opsi.labelCo2, opsi.dayaW, opsi.anomaliG, opsi.kapasitasG
   //   opsi.simpanBaris(baris)   opsi.simpanKejadian(k)   opsi.simpanBatch(b)
   //   opsi.siarkan(nama, data)  opsi.kirimWaktu() -> bool
   // =====================================================================
@@ -111,6 +111,7 @@
     const LABEL_CO2 = opsi.labelCo2 || 'CO₂';
     const DAYA_BLOWER_W = opsi.dayaW || 32;
     const ANOMALI_G = opsi.anomaliG || 15;
+    const KAPASITAS_G = opsi.kapasitasG || 11000;   // kapasitas wadah (gram) untuk visual tangki
     const BASIS = `grainsense/${SILO_ID}`;
     const TOPIK = {
       tele: `${BASIS}/telemetry`, event: `${BASIS}/event`, backlog: `${BASIS}/backlog`,
@@ -315,7 +316,7 @@
       } else if (t.co2 >= 1500 && sensor.co2 === 'ok') {
         hasil.push({ kunci: 'co2_tinggi', prioritas: 'waspada', judul: `${LABEL_CO2} DI ATAS AMBANG AERASI`,
           pemicu: `${t.co2} ppm ≥ 1.500 ppm${t.simulasi ? ' (SIMULASI)' : ''}`,
-          tindakan: 'Dipantau; blower menyala bila bertahan 30 menit dan udara masuk layak' });
+          tindakan: 'Dipantau; blower menyala bila bertahan 3 detik dan udara masuk layak' });
       }
       if (dihentikan) {
         hasil.push({ kunci: 'kendali_dihentikan', prioritas: 'tinggi', judul: 'KENDALI OTOMATIS DIHENTIKAN',
@@ -481,7 +482,7 @@
 
     function keadaanAwal(tambahan = {}) {
       return {
-        konfig: { silo: SILO_ID, labelCo2: LABEL_CO2 },
+        konfig: { silo: SILO_ID, labelCo2: LABEL_CO2, kapasitasG: KAPASITAS_G },
         waktuServer: Date.now(),
         esp: infoStatus(),
         terakhir,
@@ -489,6 +490,20 @@
         ringkasan: ringkasan(),
         batch,
         ...tambahan,
+      };
+    }
+
+    // ringkasan singkat satu silo untuk strip "Semua silo"
+    function ringkasSilo() {
+      const aktif = [...peringatanAktif.values()];
+      return {
+        silo: SILO_ID, kapasitasG: KAPASITAS_G, labelCo2: LABEL_CO2,
+        esp: infoStatus(), terakhir, batch,
+        peringatan: {
+          jumlah: aktif.length,
+          tinggi: aktif.filter((p) => p.prioritas === 'tinggi').length,
+          waspada: aktif.filter((p) => p.prioritas === 'waspada').length,
+        },
       };
     }
 
@@ -503,7 +518,7 @@
     return {
       TOPIK, terimaPesan, terimaTelemetri, terimaBacklog, terimaEvent, ubahStatus, isiRiwayat,
       tambahRiwayat, tambahKejadian, catatPerintah, aturBatch, ambilRiwayat, ringkasan,
-      evaluasiPeringatan, keadaanAwal, muat, pangkasRam,
+      evaluasiPeringatan, keadaanAwal, muat, pangkasRam, ringkasSilo,
       riwayatSejak: (ts) => riwayat.slice(indeksDari(ts)),
       kejadianSejak: (ts) => kejadian.filter((k) => k.ts >= ts),
     };

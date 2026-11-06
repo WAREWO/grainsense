@@ -26,10 +26,8 @@
 #include <time.h>
 
 // ============================ KONFIGURASI ============================
-// WIFI_SSID & WIFI_PASS ada di rahasia.h (tidak ikut di-upload ke GitHub).
-// Belum punya? Salin rahasia.contoh.h menjadi rahasia.h lalu isi.
 #include "rahasia.h"
-const char* MQTT_HOST = "192.168.137.1";   // <-- IP laptop yang menjalankan Mosquitto (hotspot Windows)
+const char* MQTT_HOST = "192.168.137.1";    // <-- IP laptop yang menjalankan Mosquitto
 const uint16_t MQTT_PORT = 1883;
 const char* SILO_ID   = "silo01";
 
@@ -47,21 +45,29 @@ const char* SILO_ID   = "silo01";
 struct Ambang {
   float tNyala      = 28.0;   // blower hidup jika suhu ruang simpan >= 28 C
   float tMati       = 25.0;   // ... mati jika <= 25 C (histeresis 3 C)
-  int   co2Nyala    = 1500;   // blower hidup jika CO2 >= 1500 ppm selama >= 30 menit
+  int   co2Nyala    = 1500;   // blower hidup jika CO2 >= 1500 ppm selama >= 5 detik
   int   co2Lepas    = 1200;   // kebutuhan karena CO2 dianggap selesai di bawah ini
   int   co2Alarm    = 3000;   // alarm pemeriksaan manual
   float rhMasukMaks = 70.0;   // syarat udara masuk: RH <= 70 %
   float rhMasukMati = 75.0;   // blower mati jika RH udara masuk > 75 % (histeresis 5)
   float dtMin       = 3.0;    // udara masuk minimal 3 C lebih dingin
   float dtLepas     = 0.0;    // dianggap tidak layak lagi bila tidak lebih dingin sama sekali
+  // PRIORITAS 1: gabah lembap -> blower nyala (dijaga supaya tidak busuk)
+  float kaNyala       = 18.0;  // kadar air >= 18 % (bertahan) -> mode lembap
+  float kaLepas       = 16.0;  // mode lembap selesai bila kadar air < 16 % (histeresis 2 poin)
+  float kaMaksWajar   = 40.0;  // di atas ini dianggap bacaan sensor tidak wajar (diabaikan)
+  float rhMasukBasah  = 85.0;  // pengaman: udara masuk lebih basah dari ini tidak ditiupkan (isi 100 untuk mematikan)
 } amb;
 
 // Durasi (detik). Mode demo memendekkan durasi; status demo dikirim di telemetri.
-uint32_t DUR_MIN_NYALA_S   = 30UL * 60;
-uint32_t DUR_MIN_MATI_S    = 30UL * 60;
-uint32_t DUR_CO2_BERTAHAN_S = 30UL * 60;
-const uint32_t DEMO_DURASI_S = 60;
-const uint32_t MANUAL_DEFAULT_MENIT = 10;
+const uint32_t DUR_NORMAL_S = 3;          // dipersingkat dari 30 menit (Tabel 3.5); kembalikan: 30UL * 60
+uint32_t DUR_MIN_NYALA_S   = DUR_NORMAL_S;
+uint32_t DUR_MIN_MATI_S    = DUR_NORMAL_S;
+uint32_t DUR_CO2_BERTAHAN_S = DUR_NORMAL_S;
+uint32_t DUR_KA_BERTAHAN_S  = DUR_NORMAL_S; // jeda nyala saat gabah lembap & jeda mati saat sudah turun (hindari bacaan sesaat)
+const uint32_t DEMO_DURASI_S = DUR_NORMAL_S;
+const uint32_t DUR_PENYIMPANGAN_S = 60UL * 60;   // blower nyala terus selama ini = penyimpangan bertahan
+const uint32_t MANUAL_DEFAULT_DETIK = 5;
 const uint32_t MANUAL_MAKS_MENIT    = 30;
 
 const uint32_t INTERVAL_BACA_MS   = 2000;
@@ -145,6 +151,7 @@ struct Simulasi {
   bool aktif = false;
   float tDalam = NAN, rhDalam = NAN, tMasuk = NAN, rhMasuk = NAN;
   int co2 = -1;
+  float ka = NAN;
 } sim;
 
 bool adaDalam = false, adaMasuk = false;
@@ -170,6 +177,8 @@ int bacaCo2Mentah() {
 }
 
 // ============================ BACA SENSOR ===========================
+const int GAGAL_SHT_MAKS = 10;   // 10 x 2 s = 20 s gagal berturut-turut baru dianggap gangguan
+
 bool wajarSuhu(float t) { return !isnan(t) && t > -10 && t < 70; }
 bool wajarRh(float h)   { return !isnan(h) && h >= 0 && h <= 100; }
 
@@ -198,7 +207,11 @@ void bacaSht() {
   float h = adaDalam ? shtDalam.readHumidity() : NAN;
   if (wajarSuhu(t) && wajarRh(h)) {
     d.tDalam = t; d.rhDalam = h; d.msDalam = millis(); gagalDalam = 0; d.sDalam = S_OK;
-  } else if (++gagalDalam >= 3) { d.sDalam = S_GANGGUAN; adaDalam = false; }
+  } else {
+    gagalDalam++;
+    if (adaDalam) shtDalam.reset();                       // coba pulihkan sensor yang macet
+    if (gagalDalam >= GAGAL_SHT_MAKS) { d.sDalam = S_GANGGUAN; adaDalam = false; }
+  }
 
   float tDraw = t, hDraw = h;
   bool dalamValid = wajarSuhu(t) && wajarRh(h);
@@ -209,7 +222,11 @@ void bacaSht() {
     d.tMasuk = t + kal.tOff;
     d.rhMasuk = constrain(h + kal.hOff, 0.0f, 100.0f);
     d.msMasuk = millis(); gagalMasuk = 0; d.sMasuk = S_OK;
-  } else if (++gagalMasuk >= 3) { d.sMasuk = S_GANGGUAN; adaMasuk = false; }
+  } else {
+    gagalMasuk++;
+    if (adaMasuk) shtMasuk.reset();
+    if (gagalMasuk >= GAGAL_SHT_MAKS) { d.sMasuk = S_GANGGUAN; adaMasuk = false; }
+  }
 }
 
 void bacaCo2() {
@@ -228,11 +245,11 @@ int bacaAdcRata(int n) {
   return s / n;
 }
 
-int kapRiwayat[5]; int kapN = 0, kapI = 0;   // rata-rata bergerak 5 pembacaan (~10 detik)
+int kapRiwayat[2]; int kapN = 0, kapI = 0;   // rata-rata bergerak 2 pembacaan (~4 detik)
 
 void bacaKapasitif() {
   int mentah = bacaAdcRata(32);
-  kapRiwayat[kapI] = mentah; kapI = (kapI + 1) % 5; if (kapN < 5) kapN++;
+  kapRiwayat[kapI] = mentah; kapI = (kapI + 1) % 2; if (kapN < 2) kapN++;
   long tot = 0; for (int i = 0; i < kapN; i++) tot += kapRiwayat[i];
   int adc = tot / kapN;
   d.kapAdc = adc;
@@ -322,6 +339,10 @@ bool modeDemo = false;
 
 uint32_t msBlowerNyala = 0;
 uint32_t msCo2MulaiTinggi = 0;   // 0 = CO2 sedang tidak tinggi
+uint32_t msKaMulaiTinggi = 0;    // 0 = kadar air sedang tidak tinggi
+uint32_t msKaTurun = 0;          // 0 = kadar air belum turun di bawah kaLepas
+bool modeLembap = false;         // blower dinyalakan karena gabah lembap
+bool tahanUdaraBasah = false;    // baru dimatikan karena udara sangat basah (cegah nyala-mati beruntun)
 bool butuhAerasi = false, udaraLayak = false;
 bool perluSetelahAerasi = false; // penyimpangan bertahan setelah satu siklus
 String alasan = "Menunggu data sensor";
@@ -362,8 +383,9 @@ void evaluasiAerasi() {
       setBlower(false, "Batas waktu manual habis");
     } else {
       setBlower(manualNyala, manualNyala ? "Perintah manual operator" : "Perintah manual operator (mati)");
+      uint32_t sisaDetik = (manualSampaiMs - now) / 1000 + 1;
       alasan = String("MANUAL: blower ") + (manualNyala ? "nyala" : "mati") + ", sisa " +
-               String((manualSampaiMs - now) / 60000 + 1) + " menit";
+               (sisaDetik < 60 ? String(sisaDetik) + " detik" : String(sisaDetik / 60 + 1) + " menit");
       return;
     }
   }
@@ -391,6 +413,74 @@ void evaluasiAerasi() {
   }
   bool co2Bertahan = msCo2MulaiTinggi && (now - msCo2MulaiTinggi) / 1000 >= DUR_CO2_BERTAHAN_S;
 
+  // ================= PRIORITAS 1: GABAH LEMBAP =================
+  // Gabah lembap/basah -> blower dinyalakan lebih dulu, tanpa menunggu syarat suhu/CO2
+  // maupun syarat "udara 3 C lebih dingin". Satu-satunya pengaman: udara masuk yang
+  // sangat basah (RH > rhMasukBasah) tidak ditiupkan karena justru menambah air.
+  bool kaSim = sim.aktif && !isnan(sim.ka);
+  float ka = kaSim ? sim.ka : d.kadarAir;
+  bool kaValid = (kaSim || d.sKap == S_OK) && !isnan(ka) && ka > 0 && ka < amb.kaMaksWajar;
+  if (kaValid && ka >= amb.kaNyala) {
+    if (msKaMulaiTinggi == 0) msKaMulaiTinggi = now;
+  } else if (!kaValid || ka < amb.kaLepas) {
+    msKaMulaiTinggi = 0;
+  }
+  bool kaBertahan = msKaMulaiTinggi && (now - msKaMulaiTinggi) / 1000 >= DUR_KA_BERTAHAN_S;
+  bool butuhLembap = modeLembap ? (kaValid && ka >= amb.kaLepas) : kaBertahan;
+  bool udaraTerlaluBasah = rhM > amb.rhMasukBasah;
+  {
+    uint32_t lamaM = (now - msBlowerMati) / 1000;
+    bool alarmCo2 = co2Valid && co2 > amb.co2Alarm;
+    String sKa = kaValid ? "kadar air " + f1(ka) + "%" : String("kadar air n/a");
+    if (butuhLembap) {
+      msKaTurun = 0;
+      butuhAerasi = true; udaraLayak = !udaraTerlaluBasah;
+      if (!blowerNyala) {
+        if (udaraTerlaluBasah) {
+          alasan = "PRIORITAS LEMBAP: " + sKa + " >= " + f1(amb.kaNyala) + "%, tetapi udara masuk sangat basah (RH " +
+                   f1(rhM) + "% > " + f1(amb.rhMasukBasah) + "%), blower ditahan agar gabah tidak bertambah basah";
+        } else if (tahanUdaraBasah && lamaM < DUR_MIN_MATI_S) {
+          alasan = "PRIORITAS LEMBAP: " + sKa + ", menunggu durasi minimum mati (" + String(DUR_MIN_MATI_S - lamaM) + " detik lagi)";
+        } else {
+          modeLembap = true;
+          tahanUdaraBasah = false;
+          setBlower(true, "Gabah lembap (" + sKa + ")");
+          alasan = "Blower nyala - PRIORITAS LEMBAP: " + sKa + " >= " + f1(amb.kaNyala) + "%, udara masuk RH " + f1(rhM) + "%";
+        }
+      } else {
+        modeLembap = true;
+        if (udaraTerlaluBasah) {
+          modeLembap = false;
+          tahanUdaraBasah = true;
+          setBlower(false, "Udara masuk sangat basah (RH " + f1(rhM) + "%)");
+          alasan = "Blower mati: udara masuk sangat basah (RH " + f1(rhM) + "% > " + f1(amb.rhMasukBasah) + "%), " + sKa;
+        } else {
+          alasan = "Blower nyala - PRIORITAS LEMBAP: " + sKa + " (berhenti bila < " + f1(amb.kaLepas) + "%)";
+        }
+      }
+      prioritas = alarmCo2 ? "tinggi" : "waspada";
+      return;
+    }
+    if (modeLembap && blowerNyala) {
+      // kadar air sudah turun di bawah kaLepas
+      if (msKaTurun == 0) msKaTurun = now;
+      uint32_t lamaTurun = (now - msKaTurun) / 1000;
+      if (lamaTurun < DUR_KA_BERTAHAN_S) {
+        alasan = "Gabah tidak lembap lagi (" + sKa + "), blower mati dalam " + String(DUR_KA_BERTAHAN_S - lamaTurun) + " detik";
+        prioritas = alarmCo2 ? "tinggi" : "normal";
+        return;
+      }
+      modeLembap = false;
+      msKaTurun = 0;
+      setBlower(false, "Gabah tidak lembap lagi (" + sKa + ")");
+      alasan = "Blower mati: gabah tidak lembap lagi (" + sKa + "), kembali ke aturan suhu/CO2";
+      prioritas = alarmCo2 ? "tinggi" : "normal";
+      return;
+    }
+    modeLembap = false;
+  }
+  // ============ PRIORITAS 2: MENJAGA (aturan Tabel 3.5) ============
+
   // ---- kebutuhan aerasi (dengan histeresis) ----
   bool butuhSuhu = blowerNyala ? (tD > amb.tMati) : (tD >= amb.tNyala);
   bool butuhCo2  = blowerNyala ? (co2Valid && co2 >= amb.co2Lepas && msCo2MulaiTinggi) : co2Bertahan;
@@ -401,7 +491,8 @@ void evaluasiAerasi() {
   udaraLayak = blowerNyala ? (rhM <= amb.rhMasukMati && selisih > amb.dtLepas)
                            : (rhM <= amb.rhMasukMaks && selisih >= amb.dtMin);
 
-  String detailMasuk = "udara masuk RH " + f1(rhM) + "%, " + f1(selisih) + " C lebih dingin";
+  String detailMasuk = "udara masuk RH " + f1(rhM) + "%, " +
+                       (selisih >= 0 ? f1(selisih) + " C lebih dingin" : f1(-selisih) + " C lebih HANGAT");
   String detailButuh = butuhSuhu ? ("suhu ruang " + f1(tD) + " C") : "";
   if (butuhCo2) detailButuh += String(detailButuh.length() ? " dan " : "") + "CO2 " + String(co2) + " ppm bertahan";
 
@@ -412,7 +503,7 @@ void evaluasiAerasi() {
     if (butuhAerasi && udaraLayak) {
       if (msBlowerMati != 0 && lamaMati < DUR_MIN_MATI_S) {
         alasan = "Aerasi perlu & udara layak, menunggu durasi minimum mati (" +
-                 String((DUR_MIN_MATI_S - lamaMati) / 60 + 1) + " menit lagi)";
+                 String(DUR_MIN_MATI_S - lamaMati) + " detik lagi)";
       } else {
         String sebab = "Aerasi perlu (" + detailButuh + ") dan " + detailMasuk;
         setBlower(true, sebab);
@@ -423,7 +514,7 @@ void evaluasiAerasi() {
                "; syarat RH <= " + f1(amb.rhMasukMaks) + "% dan >= " + f1(amb.dtMin) + " C lebih dingin)";
     } else if (msCo2MulaiTinggi) {
       alasan = "CO2 " + String(co2) + " ppm >= " + String(amb.co2Nyala) + ", dipantau (" +
-               String((now - msCo2MulaiTinggi) / 60000) + "/" + String(DUR_CO2_BERTAHAN_S / 60) + " menit)";
+               String((now - msCo2MulaiTinggi) / 1000) + "/" + String(DUR_CO2_BERTAHAN_S) + " detik)";
     } else {
       alasan = "Kondisi stabil: suhu ruang " + f1(tD) + " C, CO2 " + (co2Valid ? String(co2) + " ppm" : String("n/a")) +
                ", aerasi tidak diperlukan";
@@ -438,7 +529,7 @@ void evaluasiAerasi() {
     } else if (!butuhAerasi) {
       if (lamaNyala < DUR_MIN_NYALA_S) {
         alasan = "Kebutuhan aerasi selesai, menunggu durasi minimum nyala (" +
-                 String((DUR_MIN_NYALA_S - lamaNyala) / 60 + 1) + " menit lagi)";
+                 String(DUR_MIN_NYALA_S - lamaNyala) + " detik lagi)";
       } else {
         perluSetelahAerasi = false;
         setBlower(false, "Kebutuhan aerasi selesai (suhu ruang " + f1(tD) + " C)");
@@ -447,7 +538,7 @@ void evaluasiAerasi() {
     } else {
       alasan = "Blower nyala: aerasi masih diperlukan (" + detailButuh + "), " + detailMasuk;
       // penyimpangan bertahan setelah satu siklus penuh aerasi
-      if (lamaNyala >= DUR_MIN_NYALA_S * 2) perluSetelahAerasi = true;
+      if (lamaNyala >= DUR_PENYIMPANGAN_S) perluSetelahAerasi = true;
     }
   }
 
@@ -492,10 +583,11 @@ String buatTelemetri() {
   j += "\"rh_masuk\":" + angka(nRhMasuk(), 1) + ",";
   j += "\"co2\":" + (co2 >= 0 ? String(co2) : String("null")) + ",";
   j += "\"kap_adc\":" + String(d.kapAdc) + ",";
-  j += "\"kadar_air\":" + angka(d.kadarAir, 1) + ",";
+  j += "\"kadar_air\":" + angka((sim.aktif && !isnan(sim.ka)) ? sim.ka : d.kadarAir, 1) + ",";
   j += "\"blower\":" + String(blowerNyala ? "true" : "false") + ",";
   j += "\"butuh_aerasi\":" + String(butuhAerasi ? "true" : "false") + ",";
   j += "\"udara_layak\":" + String(udaraLayak ? "true" : "false") + ",";
+  j += "\"mode_lembap\":" + String(modeLembap ? "true" : "false") + ",";
   j += "\"alasan\":\"" + jsonEscape(alasan) + "\",";
   j += "\"prioritas\":\"" + prioritas + "\",";
   j += "\"alarm_co2\":" + String((co2 > amb.co2Alarm) ? "true" : "false") + ",";
@@ -585,10 +677,15 @@ uint32_t msCobaMqtt = 0, msCobaWifi = 0;
 
 void jagaKoneksi() {
   if (WiFi.status() != WL_CONNECTED) {
-    if (millis() - msCobaWifi > 10000) {
+    // ESP32 sudah mencoba menyambung sendiri (auto-reconnect). Firmware hanya
+    // "menyenggol" tiap 30 detik, dan hanya kalau percobaan sebelumnya sudah gagal,
+    // supaya tidak muncul error "sta is connecting".
+    int st = WiFi.status();
+    bool gagal = (st == WL_DISCONNECTED || st == WL_CONNECT_FAILED ||
+                  st == WL_NO_SSID_AVAIL || st == WL_CONNECTION_LOST);
+    if (gagal && millis() - msCobaWifi > 30000) {
       msCobaWifi = millis();
-      WiFi.disconnect();
-      WiFi.begin(WIFI_SSID, WIFI_PASS);
+      WiFi.reconnect();
     }
     return;
   }
@@ -612,11 +709,11 @@ void bantuan() {
   Serial.println(F("  status               cetak telemetri lengkap"));
   Serial.println(F("  log on|off           tampilkan ringkasan tiap 5 detik"));
   Serial.println(F("  auto                 kembali ke mode otomatis"));
-  Serial.println(F("  manual on [menit]    blower nyala manual (default 10, maks 30 menit)"));
+  Serial.println(F("  manual on [menit]    blower nyala manual (default 5 detik, maks 30 menit; 5d = 5 detik)"));
   Serial.println(F("  manual off [menit]   blower dipaksa mati"));
-  Serial.println(F("  sim tdalam|rhdalam|tmasuk|rhmasuk|co2 <nilai>   isi nilai simulasi"));
+  Serial.println(F("  sim tdalam|rhdalam|tmasuk|rhmasuk|co2|ka <nilai>   isi nilai simulasi (ka = kadar air %)"));
   Serial.println(F("  sim off              matikan semua simulasi"));
-  Serial.println(F("  demo on|off          durasi minimum & CO2 bertahan jadi 60 detik"));
+  Serial.println(F("  demo on|off          durasi minimum & CO2 bertahan 5 detik"));
   Serial.println(F("  tara                 tara ulang timbangan (simpan ke memori)"));
   Serial.println(F("  abc off              matikan ABC MH-Z19C"));
   Serial.println(F("  scan                 scan I2C"));
@@ -756,14 +853,14 @@ void jalankanPerintah(String cmd, const char* sumber) {
     kirimEvent("mode", "{\"mode\":\"AUTO\"}");
   }
   else if (a == "manual") {
-    uint32_t menit = c.length() ? (uint32_t)c.toInt() : MANUAL_DEFAULT_MENIT;
-    if (menit == 0) menit = MANUAL_DEFAULT_MENIT;
-    if (menit > MANUAL_MAKS_MENIT) menit = MANUAL_MAKS_MENIT;
+    uint32_t detik = c.endsWith("d") ? (uint32_t)c.toInt() : (uint32_t)c.toInt() * 60;   // "5d" = 5 detik, "5" = 5 menit
+    if (detik == 0) detik = MANUAL_DEFAULT_DETIK;
+    if (detik > MANUAL_MAKS_MENIT * 60) detik = MANUAL_MAKS_MENIT * 60;
     mode = M_MANUAL;
     manualNyala = (b == "on");
-    manualSampaiMs = millis() + menit * 60000UL;
-    kirimEvent("mode", "{\"mode\":\"MANUAL\",\"blower\":" + String(manualNyala ? "true" : "false") +
-                       ",\"menit\":" + String(menit) + "}");
+    manualSampaiMs = millis() + detik * 1000UL;
+    String lamaJson = (detik % 60) ? String("\"detik\":") + String(detik) : String("\"menit\":") + String(detik / 60);
+    kirimEvent("mode", "{\"mode\":\"MANUAL\",\"blower\":" + String(manualNyala ? "true" : "false") + "," + lamaJson + "}");
   }
   else if (a == "sim") {
     if (b == "off") {
@@ -777,6 +874,7 @@ void jalankanPerintah(String cmd, const char* sumber) {
       else if (b == "tmasuk") sim.tMasuk = v;
       else if (b == "rhmasuk") sim.rhMasuk = v;
       else if (b == "co2") sim.co2 = (int)v;
+      else if (b == "ka") sim.ka = v;
       else { Serial.println("Nama simulasi tidak dikenal"); return; }
       // agar logika jalan, nilai pasangan yang belum disimulasikan diambil dari sensor asli
       if (isnan(sim.tMasuk) && !isnan(sim.rhMasuk)) sim.tMasuk = d.tMasuk;
@@ -786,9 +884,9 @@ void jalankanPerintah(String cmd, const char* sumber) {
   }
   else if (a == "demo") {
     modeDemo = (b == "on");
-    DUR_MIN_NYALA_S = modeDemo ? DEMO_DURASI_S : 30UL * 60;
-    DUR_MIN_MATI_S  = modeDemo ? DEMO_DURASI_S : 30UL * 60;
-    DUR_CO2_BERTAHAN_S = modeDemo ? DEMO_DURASI_S : 30UL * 60;
+    DUR_MIN_NYALA_S = modeDemo ? DEMO_DURASI_S : DUR_NORMAL_S;
+    DUR_MIN_MATI_S  = modeDemo ? DEMO_DURASI_S : DUR_NORMAL_S;
+    DUR_CO2_BERTAHAN_S = modeDemo ? DEMO_DURASI_S : DUR_NORMAL_S;
     kirimEvent("demo", "{\"aktif\":" + String(modeDemo ? "true" : "false") + "}");
   }
   else if (a == "tara") {
@@ -902,6 +1000,7 @@ void setup() {
   Serial.printf("SHT31 dalam 0x44: %s | masuk 0x45: %s\n", adaDalam ? "OK" : "TIDAK ADA", adaMasuk ? "OK" : "TIDAK ADA");
 
   WiFi.mode(WIFI_STA);
+  WiFi.setAutoReconnect(true);
   WiFi.begin(WIFI_SSID, WIFI_PASS);
   msCobaWifi = millis();
   configTime(7 * 3600, 0, "pool.ntp.org");   // dipakai hanya kalau ada internet

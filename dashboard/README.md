@@ -62,8 +62,8 @@ Buka **http://localhost:8080**. Dari HP yang tersambung ke hotspot laptop: `http
 **Jendela 3 — simulator** (hanya bila ESP32 belum siap)
 ```powershell
 cd C:\Users\Muham\Downloads\GrainSense_Firmware_C\dashboard
-npm run sim          # normal (durasi minimum 30 menit, seperti aslinya)
-npm run sim:demo     # mode demo 60 detik + kirim 20 data backlog
+npm run sim          # normal (durasi minimum 3 detik)
+npm run sim:demo     # mode demo + kirim 20 data backlog
 ```
 Opsi tambahan: `node simulator.js --tanpa-gangguan` (tanpa gangguan sensor acak),
 `node simulator.js --bocor` (massa turun pelan tanpa transaksi → menguji deteksi anomali stok setelah 30 menit).
@@ -81,8 +81,17 @@ $env:LABEL_CO2 = "eCO₂"                     # bila sensor pengganti ENS160
 $env:DAYA_BLOWER_W = "32"                   # daya blower untuk perkiraan energi (Wh)
 $env:ANOMALI_G = "15"                       # selisih massa tanpa transaksi yang dianggap anomali
 $env:DATA_DIR = "D:\grainsense-data"        # lokasi penyimpanan riwayat (default: folder data/)
+$env:KAPASITAS_G = "11000"                  # kapasitas wadah (gram) = 100 % isi tangki di dashboard
+$env:SILO_ID = "silo01,silo02,silo03"       # satu atau beberapa silo yang dipantau (default silo01)
 npm start
 ```
+
+### Memantau beberapa silo
+
+Setiap silo punya ESP32 sendiri yang mengirim ke `grainsense/<silo>/...`. Isi `SILO_ID` dengan daftar silo dipisah koma,
+lalu dashboard menampilkan strip **Semua Silo** (berat, % isi, kadar air, suhu, CO₂, blower, status). Klik kartu untuk
+membuka silo itu (alamat `?silo=silo02`). Riwayat silo pertama tetap di `data/`, silo berikutnya di `data/<silo>/`.
+Uji tanpa hardware: jalankan simulator per silo, mis. `$env:SILO_ID = "silo02"; node simulator.js`.
 
 ## 4. Data & ekspor
 
@@ -94,7 +103,13 @@ npm start
 
 ## 5. Fitur dashboard
 
-- Kartu real-time: suhu & RH dalam, CO₂, massa (stabil / bergerak / beku), udara masuk, kadar air (gauge), status blower + alasan keputusan, mode AUTO / MANUAL / DEMO.
+- **Bilah kondisi**: keadaan silo dalam satu kalimat; berubah merah (banner alarm) bila `alarm_co2`, `prioritas: "tinggi"`, sensor rusak, atau gabah basah.
+- **Ubin sensor** suhu, RH, CO₂ dengan tren 1 jam (sparkline), dan **kadar air** dengan skala zona kering / aman ≤ 14 % / lembap / basah.
+- **Tangki silo** (WT-101): isi naik-turun sesuai massa load cell ÷ kapasitas wadah (default 11 kg, proposal 3.1), skala kg, garis LSH 95 %,
+  gabah menggelap + embun di dinding bila kadar air > 14 %, gelembung udara & kipas berputar saat blower nyala, plus tabel nilai proses bertag (MT/TT/HT/AT).
+- **Blower aerasi** (FN-101): kipas besar, lama menyala/mati yang berjalan, dan syarat Tabel 3.5 (butuh aerasi / udara masuk layak) beserta nilainya.
+- **Mode presentasi** (tombol layar di atas, atau `?presentasi`): satu layar 1366×768 untuk proyektor; tekan Esc untuk keluar.
+- Tampilan HP dengan **menu bawah**; panel simulasi bisa dilipat.
 - Kesehatan sensor + status ESP32 online/offline + RSSI + waktu aktif.
 - Grafik riwayat 1 jam / 24 jam / 3 hari (suhu, RH, CO₂, massa), arsir periode blower ON, arsir oranye periode simulasi, garis ambang Tabel 3.5, dan **proyeksi** regresi linear (bukan klaim AI).
 - **Peringatan & Prioritas** (Gambar 3.5): peringatan aktif/selesai diurutkan menurut prioritas, lengkap dengan pemicu dan tindakan sistem (Tabel 3.4).
@@ -104,7 +119,7 @@ npm start
 - Penanda usia data ("pembaruan X dtk lalu").
 - Log kejadian (blower, transaksi, mode, peringatan, perintah) dengan filter.
 - Kontrol AUTO / MANUAL ON (pilih menit) / MANUAL OFF / DEMO / TARA / sinkron waktu / perintah lanjutan — semua dengan konfirmasi.
-- Panel simulasi + skenario siap pakai; banner **MODE SIMULASI** mencolok bila `simulasi:true`.
+- Panel simulasi + skenario siap pakai (dikirim ke ESP32, blower fisik ikut menyala di mode AUTO; `simulator.js` tidak menyentuh hardware); banner **MODE SIMULASI** mencolok bila `simulasi:true`.
 - Banner alarm bila `alarm_co2` atau `prioritas: "tinggi"`.
 
 ## 6. Masalah umum
